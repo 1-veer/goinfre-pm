@@ -80,6 +80,8 @@ class GoinfrePMApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"), Binding("escape", "quit", "Quit"),
         Binding("j", "down", "Down", show=False), Binding("k", "up", "Up", show=False),
+        Binding("right", "focus_packages", "Packages", show=False, priority=True),
+        Binding("left", "focus_categories", "Categories", show=False, priority=True),
         Binding("space", "toggle", "Select"), Binding("slash", "search", "Search"),
         Binding("i", "install_one", "Install"), Binding("shift+i", "install_selected", "Install selected"),
         Binding("r", "remove_one", "Remove"), Binding("shift+r", "remove_selected", "Remove selected"),
@@ -123,8 +125,10 @@ class GoinfrePMApp(App[None]):
     def on_mount(self) -> None:
         table = self.query_one(DataTable)
         table.add_columns("", "Package", "Category", "Status", "Source", "Version")
-        self.query_one(OptionList).highlighted = 0
+        categories = self.query_one(OptionList)
+        categories.highlighted = 0
         self._refresh()
+        categories.focus()
 
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
@@ -133,7 +137,7 @@ class GoinfrePMApp(App[None]):
         self.query_one("#details").display = width >= 82
         self.query_one("#tasks").styles.height = 5 if width < 82 else (6 if width < 100 else 7)
 
-    def _refresh(self, query: str = "") -> None:
+    def _refresh(self, query: str = "", preserve_identifier: str | None = None) -> None:
         installed = self.manager.state.read().get("installed", {})
         needle = query.casefold()
         self.visible_packages = [package for package in self.packages if
@@ -145,6 +149,11 @@ class GoinfrePMApp(App[None]):
             marker = "●" if package.selected else "○"
             status = "[green]Installed[/green]" if package.identifier in installed else ("[red]Incompatible[/red]" if not package.compatible else "Available")
             table.add_row(marker, package.name, package.category, status, package.source_type, package.version, key=package.identifier)
+        if preserve_identifier:
+            for row, package in enumerate(self.visible_packages):
+                if package.identifier == preserve_identifier:
+                    table.move_cursor(row=row, animate=False)
+                    break
         self._details()
         free = available_space(self.layout.root)
         self.query_one("#storage", Static).update(f"{self.layout.root}  •  {free / 1024**3:.1f} GiB free")
@@ -182,23 +191,45 @@ class GoinfrePMApp(App[None]):
             self._refresh(event.value)
 
     def action_down(self) -> None:
-        self.query_one(DataTable).action_cursor_down()
+        categories = self.query_one(OptionList)
+        if categories.has_focus:
+            categories.action_cursor_down()
+        else:
+            self.query_one(DataTable).action_cursor_down()
 
     def action_up(self) -> None:
-        self.query_one(DataTable).action_cursor_up()
+        categories = self.query_one(OptionList)
+        if categories.has_focus:
+            categories.action_cursor_up()
+        else:
+            self.query_one(DataTable).action_cursor_up()
+
+    def action_focus_packages(self) -> None:
+        table = self.query_one(DataTable)
+        if self.visible_packages:
+            table.focus()
+
+    def action_focus_categories(self) -> None:
+        categories = self.query_one(OptionList)
+        if categories.display:
+            categories.focus()
 
     def action_toggle(self) -> None:
+        table = self.query_one(DataTable)
+        if not table.has_focus:
+            return
         package = self._current()
         if package and not self.busy:
             package.selected = not package.selected
-            self._refresh(self.query_one("#search", Input).value)
+            self._refresh(self.query_one("#search", Input).value, package.identifier)
 
     def action_select_all(self) -> None:
         if not self.busy:
+            current = self._current()
             target = not all(package.selected for package in self.visible_packages)
             for package in self.visible_packages:
                 package.selected = target
-            self._refresh()
+            self._refresh(preserve_identifier=current.identifier if current else None)
 
     def action_search(self) -> None:
         search = self.query_one("#search", Input)

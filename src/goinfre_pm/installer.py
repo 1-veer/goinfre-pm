@@ -137,7 +137,19 @@ class PackageManager:
         executable = find_executable(live, package)
         if executable is None:
             raise RuntimeError(f"No executable found for {package.name}")
-        return integrate(package, executable, live)
+        launchers = integrate(package, executable, live)
+        state = self.state.read()
+        existing = state.get("installed", {}).get(identifier, {})
+        record = InstalledPackage(
+            identifier=identifier,
+            version=str(existing.get("version", package.version)),
+            source=str(existing.get("source", package.url)),
+            executable=str(executable),
+            launchers=launchers,
+            installed_at=str(existing.get("installed_at", "")),
+        )
+        self.state.set_installed(record, desired=identifier in state.get("desired", []), install_root=self.layout.root)
+        return launchers
 
     def remove(self, identifier: str, remove_cache: bool = False, remove_config: bool = False) -> Iterator[Event]:
         package = self.package(identifier)

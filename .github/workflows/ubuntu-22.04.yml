@@ -1,0 +1,71 @@
+name: Ubuntu 22.04
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-contract:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check --upgrade ".[test]"
+
+      - name: Compile and test
+        run: |
+          python -m compileall src tests goinfre.py
+          python -m pytest
+          sh -n install.sh
+          shellcheck install.sh
+
+      - name: Exercise clean no-privilege installation
+        env:
+          HOME: ${{ runner.temp }}/gpm-home
+          GPM_INSTALL_ROOT: ${{ runner.temp }}/goinfre-pm
+        run: |
+          mkdir -p "$HOME" "$GPM_INSTALL_ROOT"
+          ./install.sh
+          export PATH="$HOME/.local/bin:$PATH"
+          gpm version
+          gpm search zen-browser
+          gpm doctor
+
+      - name: Exercise keyboard navigation at supported sizes
+        env:
+          HOME: ${{ runner.temp }}/gpm-home
+          GPM_PACKAGES_FILE: ${{ runner.temp }}/goinfre-pm/runtime/packages.toml
+        run: |
+          "${{ runner.temp }}/goinfre-pm/venv/bin/python" - <<'PY'
+          import asyncio
+          from textual.widgets import DataTable, OptionList
+          from goinfre_pm.app import GoinfrePMApp
+
+          async def smoke() -> None:
+              for size in ((80, 24), (120, 36)):
+                  app = GoinfrePMApp()
+                  async with app.run_test(size=size) as pilot:
+                      await pilot.pause()
+                      if size[0] >= 100:
+                          assert app.query_one(OptionList).has_focus
+                          await pilot.press("right")
+                          assert app.query_one(DataTable).has_focus
+                          await pilot.press("left")
+                          assert app.query_one(OptionList).has_focus
+
+          asyncio.run(smoke())
+          PY

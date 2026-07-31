@@ -31,11 +31,41 @@ def test_executable_discovery_prefers_metadata(tmp_path: Path) -> None:
     assert find_executable(tmp_path, package()) == expected
 
 
+def test_executable_discovery_handles_archive_wrapper_directory(tmp_path: Path) -> None:
+    expected = tmp_path / "sample-tool-1.2.3" / "bin" / "sample"
+    expected.parent.mkdir(parents=True)
+    expected.write_text("#!/bin/sh\n", encoding="utf-8")
+    expected.chmod(0o755)
+    helper = tmp_path / "sample-tool-1.2.3" / "helper"
+    helper.write_text("#!/bin/sh\n", encoding="utf-8")
+    helper.chmod(0o755)
+    assert find_executable(tmp_path, package()) == expected
+
+
+def test_zen_archive_layout_selects_browser_not_helper(tmp_path: Path) -> None:
+    root = tmp_path / "zen"
+    browser = root / "zen"
+    browser.parent.mkdir(parents=True)
+    browser.write_text("browser", encoding="utf-8")
+    browser.chmod(0o755)
+    helper = root / "glxtest"
+    helper.write_text("helper", encoding="utf-8")
+    helper.chmod(0o755)
+    zen = package(
+        identifier="zen-browser",
+        name="Zen Browser",
+        executable_candidates=("zen/zen", "zen", "zen-bin"),
+    )
+    assert find_executable(tmp_path, zen) == browser
+
+
 def test_desktop_entry_quotes_paths_with_spaces(tmp_path: Path) -> None:
     executable = tmp_path / "path with spaces" / "sample"
     content = desktop_entry(package(), executable)
     assert f'Exec="{executable}"' in content
     assert "Terminal=false" in content
+    assert "--profile" not in content
+    assert "XDG_CONFIG_HOME" not in content
 
 
 def test_generated_integration_and_removal(monkeypatch, tmp_path: Path) -> None:
