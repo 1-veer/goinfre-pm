@@ -213,20 +213,6 @@ commands, PATH, state, integrations, catalog validity, and architecture.
 - **Stale package URL:** update only that package entry after verifying the
   publisher and architecture.
 
-## Contributing, license, and attribution
-
-Add tests for backend behavior, keep package URLs HTTPS-only, document pinned
-assets, and run the checks below before submitting a change. The
-`.github/workflows/ubuntu-22.04.yml` workflow is the authoritative platform
-contract: it runs these checks, a clean installer smoke test, `gpm doctor`, and
-the Textual UI on Ubuntu 22.04 with Python 3.10.
-
-```sh
-python -m compileall .
-python -m pytest
-shellcheck install.sh
-```
-
 The project is MIT-licensed; see `LICENSE`. `NOTICE.md` records the cautious
 provenance of the supplied code and historical inspiration without claiming
 that all inherited work was originally written by the current maintainer.
