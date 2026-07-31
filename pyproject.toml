@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68,<76", "wheel>=0.41,<1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "goinfre-pm"
+version = "1.0.0"
+description = "A safe no-sudo package manager for writable goinfre storage"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "veer" }]
+dependencies = [
+  "textual==0.83.0",
+  "tomli==2.0.2; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+test = ["pytest==8.3.5"]
+
+[project.scripts]
+gpm = "goinfre_pm.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+goinfre_pm = ["theme.tcss", "project.conf"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

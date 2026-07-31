@@ -1,0 +1,38 @@
+$gpm-background: #0d0914;
+$gpm-panel: #171120;
+$gpm-panel-raised: #21172d;
+$gpm-violet: #a855f7;
+$gpm-lavender: #c4b5fd;
+$gpm-text: #f5f3f7;
+$gpm-muted: #9b93a6;
+$gpm-green: #56c596;
+$gpm-red: #ef6b73;
+$gpm-amber: #e6b450;
+
+Screen { background: $gpm-background; color: $gpm-text; }
+#header { dock: top; height: 3; background: $gpm-panel-raised; border-bottom: solid $gpm-violet; padding: 0 1; }
+#brand { width: 22; color: $gpm-lavender; text-style: bold; content-align: left middle; }
+#storage { width: 1fr; color: $gpm-muted; content-align: right middle; }
+#body { height: 1fr; }
+.panel { background: $gpm-panel; border: round #49325e; }
+#categories { width: 22; min-width: 16; }
+#categories OptionList { height: 1fr; background: $gpm-panel; border: none; }
+#categories OptionList > .option-list--option-highlighted { background: #4c1d70; color: $gpm-text; }
+#catalog { width: 2fr; min-width: 38; }
+#package-table { height: 1fr; background: $gpm-panel; }
+#package-table > .datatable--cursor { background: #5b2182; color: $gpm-text; }
+#details { width: 1fr; min-width: 26; padding: 1; color: $gpm-text; }
+#details-title { height: 2; color: $gpm-lavender; text-style: bold; }
+#details-body { height: 1fr; color: $gpm-muted; }
+#tasks { dock: bottom; height: 7; background: $gpm-panel-raised; border-top: solid #49325e; }
+#operation { height: 1; padding: 0 1; color: $gpm-lavender; }
+#progress { height: 1; margin: 0 1; color: $gpm-violet; }
+#logs { height: 1fr; padding: 0 1; background: $gpm-background; color: $gpm-muted; }
+#search { dock: bottom; height: 3; display: none; border: round $gpm-violet; background: $gpm-panel-raised; }
+#search.visible { display: block; }
+Footer { background: $gpm-panel-raised; color: $gpm-muted; }
+ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
+.modal { width: 64; max-width: 90%; height: auto; background: $gpm-panel-raised; border: round $gpm-violet; padding: 1 2; }
+.modal-title { color: $gpm-lavender; text-style: bold; height: 2; }
+.modal-buttons { height: 3; align: center middle; }
+.modal-buttons Button { margin: 0 1; }
