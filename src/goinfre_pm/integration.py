@@ -23,17 +23,33 @@ def _within(base: Path, candidate: Path) -> bool:
 
 
 def find_executable(package_dir: Path, package: Package) -> Path | None:
+    """Find the configured executable, including beneath one archive wrapper.
+
+    Upstream archives commonly contain a versioned top-level directory. Safe
+    extraction intentionally preserves it, so configured paths are also matched
+    as path suffixes instead of falling back to an unrelated helper executable.
+    """
     for relative in package.executable_candidates:
         candidate = package_dir / relative
         if _within(package_dir, candidate) and candidate.is_file():
             return candidate
+        wanted = Path(relative).parts
+        matches: list[Path] = []
+        for nested in package_dir.rglob(Path(relative).name):
+            if not nested.is_file() or not _within(package_dir, nested):
+                continue
+            actual = nested.relative_to(package_dir).parts
+            if len(actual) >= len(wanted) and actual[-len(wanted):] == wanted:
+                matches.append(nested)
+        if matches:
+            return min(matches, key=lambda item: len(item.relative_to(package_dir).parts))
     preferred = {package.identifier.lower(), package.name.lower().replace(" ", "-"), "apprun"}
     candidates: list[tuple[int, Path]] = []
     for candidate in package_dir.rglob("*"):
         if candidate.is_symlink() or not candidate.is_file():
             continue
         try:
-            executable = os.access(candidate, os.X_OK) or candidate.read_bytes()[:4] == b"\x7fELF"
+            executable = os.access(candidate, os.X_OK)
         except OSError:
             continue
         if not executable:

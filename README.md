@@ -72,6 +72,7 @@ in the centralized project configuration.
 | Key | Action |
 |---|---|
 | `↑`/`↓`, `j`/`k` | Navigate packages |
+| `→` / `←` | Move focus from categories to packages / back to categories |
 | `Space` | Select or deselect |
 | `/` | Search |
 | `Enter` | Refresh/view details |
@@ -147,9 +148,28 @@ and disabled, never executed.
 
 ## Updating and uninstalling
 
-Update this checkout, then rerun `./install.sh`. Update application payloads
-with `gpm update NAME` or `gpm update --all`; replacement is staged and rolled
-back if integration fails.
+After pushing project changes, do not clone the repository again on each school
+machine. Update the existing checkout and rerun the idempotent installer:
+
+```sh
+cd /path/to/goinfre-pm
+git pull --ff-only
+./install.sh
+```
+
+This updates the goinfre virtual environment, application code, catalog, and
+`~/.local/bin/gpm` launcher while retaining installed applications, desired
+package state, and user configuration. For an existing Zen installation, first
+repair its command link without downloading it again. If it still fails, replace
+the payload from the corrected official latest-release URL:
+
+```sh
+gpm repair
+gpm update zen-browser
+```
+
+Use `gpm update --all` to refresh every installed application. Application
+replacement is staged and rolled back if integration fails.
 
 ```sh
 ./install.sh uninstall
