@@ -36,6 +36,13 @@ def _strings(data: dict[str, Any], key: str, default: tuple[str, ...] = ()) -> t
     return tuple(value)
 
 
+def _boolean(data: dict[str, Any], key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if not isinstance(value, bool):
+        raise ConfigurationError(f"{key} must be a boolean")
+    return value
+
+
 def load_packages(path: Path | None = None) -> list[Package]:
     path = default_packages_file() if path is None else path
     legacy = path if path.suffix == ".conf" else path.with_suffix(".conf")
@@ -64,6 +71,8 @@ def load_packages(path: Path | None = None) -> list[Package]:
             actions_raw = entry.get("post_install", [])
             if not isinstance(actions_raw, list):
                 raise ConfigurationError(f"{identifier}: post_install must be an array of tables")
+            if not all(isinstance(item, dict) for item in actions_raw):
+                raise ConfigurationError(f"{identifier}: every post_install action must be a table")
             package = Package(
                 identifier=identifier,
                 name=str(entry.get("name", identifier)),
@@ -74,13 +83,14 @@ def load_packages(path: Path | None = None) -> list[Package]:
                 architectures=_strings(entry, "architectures", ("x86_64",)),
                 executable_candidates=_strings(entry, "executables"),
                 icon_candidates=_strings(entry, "icons"),
-                desktop=bool(entry.get("desktop", True)),
-                terminal=bool(entry.get("terminal", False)),
+                desktop=_boolean(entry, "desktop", True),
+                terminal=_boolean(entry, "terminal", False),
                 version=str(entry.get("version", "latest")),
-                remove_user_config=bool(entry.get("remove_user_config", False)),
+                remove_user_config=_boolean(entry, "remove_user_config", False),
                 config_paths=_strings(entry, "config_paths"),
                 asset_pattern=str(entry.get("asset_pattern", "")),
                 notes=str(entry.get("notes", "")),
+                enabled=_boolean(entry, "enabled", True),
                 post_install=tuple(PostInstallAction.from_dict(item) for item in actions_raw),
             )
         except (KeyError, TypeError, ValueError) as exc:

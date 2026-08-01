@@ -7,19 +7,22 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.events import Resize
+from textual.events import DescendantFocus, Resize
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
 
 from .branding import DISPLAY_NAME, VERSION
 from .config import load_packages
+from .errors import error_text, write_crash_log
 from .installer import PackageManager
 from .models import Package
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root
 
 
 class ConfirmModal(ModalScreen[bool]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
     def __init__(self, title: str, message: str) -> None:
         super().__init__()
         self.title_text = title
@@ -36,8 +39,13 @@ class ConfirmModal(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
 
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
 
 class PathModal(ModalScreen[Path | None]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
     def __init__(self, current: Path) -> None:
         super().__init__()
         self.current = current
@@ -55,14 +63,27 @@ class PathModal(ModalScreen[Path | None]):
         if event.button.id == "cancel":
             self.dismiss(None)
             return
-        value = Path(self.query_one(Input).value).expanduser().resolve()
+        raw_value = self.query_one(Input).value.strip()
+        if not raw_value:
+            self.query_one("#path-message", Static).update("[red]Enter a directory path.[/red]")
+            return
+        try:
+            value = Path(raw_value).expanduser().resolve()
+        except OSError as exc:
+            self.query_one("#path-message", Static).update(f"[red]{error_text(exc)}[/red]")
+            return
         if not is_writable_directory(value, create=True):
             self.query_one("#path-message", Static).update("[red]That directory is not writable.[/red]")
             return
         self.dismiss(value)
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
 
 class HelpModal(ModalScreen[None]):
+    BINDINGS = [Binding("escape", "cancel", "Close", show=False)]
+
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal"):
             yield Label("Keyboard shortcuts", classes="modal-title")
@@ -73,12 +94,15 @@ class HelpModal(ModalScreen[None]):
     def on_button_pressed(self, _event: Button.Pressed) -> None:
         self.dismiss(None)
 
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
 
 class GoinfrePMApp(App[None]):
     CSS_PATH = "theme.tcss"
     TITLE = DISPLAY_NAME
     BINDINGS = [
-        Binding("q", "quit", "Quit"), Binding("escape", "quit", "Quit"),
+        Binding("q", "quit", "Quit"), Binding("escape", "back", "Back", show=False),
         Binding("j", "down", "Down", show=False), Binding("k", "up", "Up", show=False),
         Binding("right", "focus_packages", "Packages", show=False, priority=True),
         Binding("left", "focus_categories", "Categories", show=False, priority=True),
@@ -109,7 +133,8 @@ class GoinfrePMApp(App[None]):
             yield Static(id="storage")
         with Horizontal(id="body"):
             with Vertical(id="categories", classes="panel"):
-                yield OptionList(*(Option(item) for item in ["All", "Browsers", "Editors and IDEs", "Developer Tools", "Communication", "Media", "Installed"]))
+                categories = list(dict.fromkeys(package.category for package in self.packages))
+                yield OptionList(*(Option(item) for item in ["All", *categories, "Installed"]), id="category-list")
             with Vertical(id="catalog", classes="panel"):
                 yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="details", classes="panel"):
@@ -129,6 +154,7 @@ class GoinfrePMApp(App[None]):
         categories.highlighted = 0
         self._refresh()
         categories.focus()
+        self._set_active_pane("categories")
 
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
@@ -136,18 +162,37 @@ class GoinfrePMApp(App[None]):
         self.query_one("#categories").display = width >= 100
         self.query_one("#details").display = width >= 82
         self.query_one("#tasks").styles.height = 5 if width < 82 else (6 if width < 100 else 7)
+        if width < 100 and self.query_one(OptionList).has_focus and self.visible_packages:
+            self.action_focus_packages()
+
+    def _set_active_pane(self, active: str | None) -> None:
+        titles = {"categories": "CATEGORIES", "catalog": "PACKAGES", "details": "DETAILS"}
+        for identifier, title in titles.items():
+            panel = self.query_one(f"#{identifier}", Vertical)
+            panel.border_title = f"{title}  •  ACTIVE" if identifier == active else title
+
+    def on_descendant_focus(self, event: DescendantFocus) -> None:
+        if event.widget.id == "category-list":
+            self._set_active_pane("categories")
+        elif event.widget.id == "package-table":
+            self._set_active_pane("catalog")
 
     def _refresh(self, query: str = "", preserve_identifier: str | None = None) -> None:
         installed = self.manager.state.read().get("installed", {})
         needle = query.casefold()
         self.visible_packages = [package for package in self.packages if
+            (package.enabled or package.identifier in installed)
+            and
             (self.category == "All" or (self.category == "Installed" and package.identifier in installed) or package.category == self.category)
             and (not needle or needle in f"{package.identifier} {package.name} {package.description}".casefold())]
         table = self.query_one(DataTable)
         table.clear()
         for package in self.visible_packages:
             marker = "●" if package.selected else "○"
-            status = "[green]Installed[/green]" if package.identifier in installed else ("[red]Incompatible[/red]" if not package.compatible else "Available")
+            if package.identifier in installed:
+                status = "[yellow]Installed · unsupported[/yellow]" if not package.enabled else "[green]Installed[/green]"
+            else:
+                status = "[red]Incompatible[/red]" if not package.compatible else "Available"
             table.add_row(marker, package.name, package.category, status, package.source_type, package.version, key=package.identifier)
         if preserve_identifier:
             for row, package in enumerate(self.visible_packages):
@@ -155,8 +200,11 @@ class GoinfrePMApp(App[None]):
                     table.move_cursor(row=row, animate=False)
                     break
         self._details()
-        free = available_space(self.layout.root)
-        self.query_one("#storage", Static).update(f"{self.layout.root}  •  {free / 1024**3:.1f} GiB free")
+        try:
+            free_text = f"{available_space(self.layout.root) / 1024**3:.1f} GiB free"
+        except OSError:
+            free_text = "storage unavailable"
+        self.query_one("#storage", Static).update(f"{self.layout.root}  •  {free_text}")
 
     def _current(self) -> Package | None:
         table = self.query_one(DataTable)
@@ -171,7 +219,13 @@ class GoinfrePMApp(App[None]):
             return
         live = self.layout.apps / package.identifier
         executable = self.manager.state.read().get("installed", {}).get(package.identifier, {}).get("executable", "—")
-        size = sum(path.stat().st_size for path in live.rglob("*") if path.is_file()) if live.is_dir() else 0
+        size = 0
+        if live.is_dir():
+            for path in live.rglob("*"):
+                try:
+                    size += path.stat().st_size if path.is_file() else 0
+                except OSError:
+                    continue
         self.query_one("#details-body", Static).update(
             f"[b]{package.name}[/b]\n\n{package.description}\n\n"
             f"Category: {package.category}\nSource: {package.source_type}\nArchitecture: {', '.join(package.architectures)}\n"
@@ -208,11 +262,27 @@ class GoinfrePMApp(App[None]):
         table = self.query_one(DataTable)
         if self.visible_packages:
             table.focus()
+            self._set_active_pane("catalog")
 
     def action_focus_categories(self) -> None:
         categories = self.query_one(OptionList)
         if categories.display:
             categories.focus()
+            self._set_active_pane("categories")
+
+    def action_back(self) -> None:
+        search = self.query_one("#search", Input)
+        if search.has_class("visible"):
+            search.remove_class("visible")
+            self.action_focus_packages()
+        elif self.query_one(DataTable).has_focus:
+            self.action_focus_categories()
+
+    def action_quit(self) -> None:
+        if self.busy:
+            self.notify("Wait for the current operation to finish before quitting", severity="warning")
+            return
+        self.exit()
 
     def action_toggle(self) -> None:
         table = self.query_one(DataTable)
@@ -235,9 +305,11 @@ class GoinfrePMApp(App[None]):
         search = self.query_one("#search", Input)
         search.add_class("visible")
         search.focus()
+        self._set_active_pane(None)
 
     def action_logs(self) -> None:
         self.query_one(RichLog).focus()
+        self._set_active_pane(None)
 
     def action_help(self) -> None:
         self.push_screen(HelpModal())
@@ -282,33 +354,46 @@ class GoinfrePMApp(App[None]):
         elif not packages:
             self.notify("No packages selected", severity="warning")
         else:
+            self.busy = True
             self._worker(packages, remove)
 
     @work(thread=True, exclusive=True)
     def _worker(self, packages: list[Package], remove: bool) -> None:
-        self.busy = True
         try:
             for package in packages:
-                self.call_from_thread(self.query_one("#operation", Static).update, f"{'Removing' if remove else 'Installing'} {package.name}")
-                events = self.manager.remove(package.identifier) if remove else self.manager.install(
-                    package.identifier,
-                    progress_callback=lambda value: self.call_from_thread(
-                        self.query_one(ProgressBar).update, progress=value
-                    ),
-                )
-                for kind, value in events:
-                    if kind == "log":
-                        self.call_from_thread(self.query_one(RichLog).write, str(value))
-                    elif kind == "progress":
-                        self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
-                self.call_from_thread(self.notify, f"{package.name}: {'removed' if remove else 'installed'}")
-        except Exception as exc:
-            self.call_from_thread(self.query_one(RichLog).write, f"[red]{exc}[/red]")
-            self.call_from_thread(self.notify, str(exc), severity="error")
+                try:
+                    self.call_from_thread(self.query_one(ProgressBar).update, progress=0)
+                    self.call_from_thread(self.query_one("#operation", Static).update, f"{'Removing' if remove else 'Installing'} {package.name}")
+                    events = self.manager.remove(package.identifier) if remove else self.manager.install(
+                        package.identifier,
+                        progress_callback=lambda value: self.call_from_thread(
+                            self.query_one(ProgressBar).update, progress=value
+                        ),
+                    )
+                    for kind, value in events:
+                        if kind == "log":
+                            self.call_from_thread(self.query_one(RichLog).write, str(value))
+                        elif kind == "progress":
+                            self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
+                    self.call_from_thread(self.notify, f"{package.name}: {'removed' if remove else 'installed'}")
+                except Exception as exc:
+                    message = error_text(exc)
+                    self.call_from_thread(self.query_one(RichLog).write, f"[red]{package.name}: {message}[/red]")
+                    self.call_from_thread(self.notify, f"{package.name}: {message}", severity="error")
         finally:
             self.busy = False
             self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
             self.call_from_thread(self._refresh)
+
+    def _handle_exception(self, error: Exception) -> None:
+        """Replace Textual's terminal traceback with a concise recoverable report."""
+        crash_log = write_crash_log(error)
+        self._return_code = 1
+        if self._exception is None:
+            self._exception = error
+            self._exception_event.set()
+        suffix = f" Details saved to {crash_log}." if crash_log else ""
+        self.panic(f"{DISPLAY_NAME} encountered an unexpected error: {error_text(error)}.{suffix}")
 
 
 def run_tui() -> None:

@@ -62,6 +62,7 @@ class Package:
     config_paths: tuple[str, ...] = ()
     asset_pattern: str = ""
     notes: str = ""
+    enabled: bool = True
     post_install: tuple[PostInstallAction, ...] = ()
     selected: bool = field(default=False, compare=False)
 

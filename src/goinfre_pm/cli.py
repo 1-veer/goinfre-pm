@@ -9,6 +9,7 @@ import sys
 
 from .branding import COMMAND, DISPLAY_NAME, SLUG, VERSION
 from .config import ConfigurationError, load_packages
+from .errors import error_text, write_crash_log
 from .integration import AUTOSTART_DIR, DESKTOP_DIR, USER_BIN
 from .installer import PackageManager
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root, verify_install_root
@@ -147,10 +148,12 @@ def _print_packages(query: str = "") -> None:
     packages = load_packages()
     state = StateStore().read().get("installed", {})
     for package in packages:
+        if not package.enabled and package.identifier not in state:
+            continue
         haystack = f"{package.identifier} {package.name} {package.description} {package.category}".casefold()
         if terms and terms not in haystack:
             continue
-        status = "installed" if package.identifier in state else "available"
+        status = "unsupported" if not package.enabled else ("installed" if package.identifier in state else "available")
         compatible = "" if package.compatible else " [incompatible]"
         print(f"{package.identifier:20} {status:10} {package.category:18} {package.name}{compatible}")
 
@@ -218,5 +221,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{DISPLAY_NAME} {VERSION}")
         return 0
     except (ConfigurationError, OSError, RuntimeError, ValueError) as exc:
-        print(f"{COMMAND}: error: {exc}", file=sys.stderr)
+        print(f"{COMMAND}: error: {error_text(exc)}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print(f"\n{COMMAND}: cancelled", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        crash_log = write_crash_log(exc)
+        print(f"{COMMAND}: unexpected error: {error_text(exc)}", file=sys.stderr)
+        if crash_log:
+            print(f"Details saved to {crash_log}", file=sys.stderr)
         return 1

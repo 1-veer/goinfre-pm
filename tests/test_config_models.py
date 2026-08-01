@@ -29,6 +29,20 @@ terminal = true
     assert package.terminal is True
 
 
+def test_curated_catalog_includes_verified_developer_tools() -> None:
+    catalog = Path(__file__).parents[1] / "packages.toml"
+    packages = {package.identifier: package for package in load_packages(catalog)}
+
+    assert packages["antigravity"].executable_candidates == (
+        "Antigravity/antigravity",
+        "Antigravity/bin/antigravity",
+    )
+    assert packages["stremio"].enabled is False
+    expected = {"lazygit", "bat", "fd", "fzf", "shellcheck", "github-cli", "git-delta"}
+    assert expected <= packages.keys()
+    assert all(not packages[identifier].desktop for identifier in expected)
+
+
 @pytest.mark.parametrize("identifier", ["../escape", "bad/name", "BadName", "a..b", "-leading", "trailing-"])
 def test_invalid_package_identifiers_are_rejected(identifier: str) -> None:
     with pytest.raises(ValueError):
@@ -48,6 +62,28 @@ url = "https://example.invalid/b"
         encoding="utf-8",
     )
     with pytest.raises(ConfigurationError):
+        load_packages(config)
+
+
+def test_invalid_boolean_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "packages.toml"
+    config.write_text(
+        '[[package]]\nid = "tool"\nurl = "https://example.invalid/tool"\nenabled = "false"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="enabled must be a boolean"):
+        load_packages(config)
+
+
+def test_invalid_post_install_item_is_rejected(tmp_path: Path) -> None:
+    config = tmp_path / "packages.toml"
+    config.write_text(
+        '[[package]]\nid = "tool"\nurl = "https://example.invalid/tool"\npost_install = ["chmod"]\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="post_install action must be a table"):
         load_packages(config)
 
 

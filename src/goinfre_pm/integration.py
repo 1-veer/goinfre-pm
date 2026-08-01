@@ -77,6 +77,13 @@ def desktop_entry(package: Package, executable: Path, icon: Path | None = None) 
     safe_name = package.name.replace("\n", " ").replace("\r", " ")
     safe_description = package.description.replace("\n", " ").replace("\r", " ")
     exec_value = _desktop_exec(executable)
+    desktop_categories = {
+        "Browsers": "Network;WebBrowser;",
+        "Editors and IDEs": "Development;IDE;",
+        "Developer Tools": "Development;",
+        "Communication": "Network;Chat;",
+        "Media": "AudioVideo;Player;",
+    }.get(package.category, "Utility;")
     lines = [
         "[Desktop Entry]",
         "Type=Application",
@@ -85,7 +92,7 @@ def desktop_entry(package: Package, executable: Path, icon: Path | None = None) 
         f"Exec={exec_value}",
         f"Terminal={'true' if package.terminal else 'false'}",
         f"Icon={icon or package.identifier}",
-        "Categories=Utility;Development;",
+        f"Categories={desktop_categories}",
         "StartupNotify=true",
     ]
     return "\n".join(lines) + "\n"
