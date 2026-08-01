@@ -8,7 +8,7 @@ version = "1.1.0"
 description = "A safe no-sudo package manager for writable goinfre storage"
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = { file = "LICENSE" }
 authors = [{ name = "Ayoub Bougatia" }]
 dependencies = [
   "textual==0.83.0",
