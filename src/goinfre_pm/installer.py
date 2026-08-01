@@ -65,6 +65,9 @@ class PackageManager:
         progress_callback: Callable[[float], None] | None = None,
     ) -> Iterator[Event]:
         package = self.package(identifier)
+        if not package.enabled:
+            reason = package.notes or "this catalog entry is no longer supported"
+            raise RuntimeError(f"{package.name} is unavailable: {reason}")
         if not package.compatible:
             raise RuntimeError(f"{package.name} does not support this machine architecture")
         verify_install_root(self.layout.root)
@@ -181,5 +184,5 @@ class PackageManager:
     def restore(self) -> Iterator[Event]:
         desired = self.state.read().get("desired", [])
         for identifier in desired:
-            if identifier in self.packages and not self.installed(identifier):
+            if identifier in self.packages and self.packages[identifier].enabled and not self.installed(identifier):
                 yield from self.install(identifier)

@@ -39,11 +39,11 @@ id = "tor-browser"
 name = "Tor Browser"
 description = "Privacy browser distributed by the Tor Project."
 category = "Browsers"
-url = "https://dist.torproject.org/torbrowser/15.0.17/tor-browser-linux-x86_64-15.0.17.tar.xz"
+url = "https://www.torproject.org/dist/torbrowser/15.0.19/tor-browser-linux-x86_64-15.0.19.tar.xz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["Browser/start-tor-browser", "Browser/firefox.real"]
-version = "15.0.17"
+version = "15.0.19"
 notes = "Pinned official distribution URL; update the catalog when Tor retires this release."
 
 [[package]]
@@ -222,6 +222,19 @@ version = "2024.2.2.13"
 notes = "Tracking parameters and temporary mirror host were removed; pinned canonical redirect remains."
 
 [[package]]
+id = "antigravity"
+name = "Google Antigravity"
+description = "Google's agent-first development platform and IDE."
+category = "Editors and IDEs"
+url = "https://edgedl.me.gvt1.com/edgedl/release2/j0qc3/antigravity/stable/1.23.2-4781536860569600/linux-x64/Antigravity.tar.gz"
+source_type = "tar"
+architectures = ["x86_64"]
+executables = ["Antigravity/antigravity", "Antigravity/bin/antigravity"]
+icons = ["Antigravity/resources/app/out/vs/workbench/contrib/antigravityCustomAppIcon/browser/media/antigravity/antigravity.png", "Antigravity/resources/app/resources/linux/code.png"]
+version = "1.23.2"
+notes = "Pinned official Linux x64 archive from the Antigravity download page."
+
+[[package]]
 id = "go"
 name = "Go"
 description = "Go programming language toolchain."
@@ -245,6 +258,97 @@ source_type = "github"
 asset_pattern = 'x86_64-unknown-linux-musl\.tar\.gz$'
 architectures = ["x86_64"]
 executables = ["rg"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "lazygit"
+name = "lazygit"
+description = "Terminal UI for everyday Git operations."
+category = "Developer Tools"
+url = "https://github.com/jesseduffield/lazygit"
+source_type = "github"
+asset_pattern = '^lazygit_.*_linux_x86_64\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["lazygit"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "bat"
+name = "bat"
+description = "A cat replacement with syntax highlighting and Git integration."
+category = "Developer Tools"
+url = "https://github.com/sharkdp/bat"
+source_type = "github"
+asset_pattern = '^bat-v.*-x86_64-unknown-linux-musl\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["bat"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "fd"
+name = "fd"
+description = "Fast and friendly alternative to find."
+category = "Developer Tools"
+url = "https://github.com/sharkdp/fd"
+source_type = "github"
+asset_pattern = '^fd-v.*-x86_64-unknown-linux-musl\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["fd"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "fzf"
+name = "fzf"
+description = "General-purpose command-line fuzzy finder."
+category = "Developer Tools"
+url = "https://github.com/junegunn/fzf"
+source_type = "github"
+asset_pattern = '^fzf-.*-linux_amd64\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["fzf"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "shellcheck"
+name = "ShellCheck"
+description = "Static analysis and diagnostics for shell scripts."
+category = "Developer Tools"
+url = "https://github.com/koalaman/shellcheck"
+source_type = "github"
+asset_pattern = '^shellcheck-v.*\.linux\.x86_64\.tar\.xz$'
+architectures = ["x86_64"]
+executables = ["shellcheck"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "github-cli"
+name = "GitHub CLI"
+description = "GitHub pull requests, issues, releases, and workflows from the terminal."
+category = "Developer Tools"
+url = "https://github.com/cli/cli"
+source_type = "github"
+asset_pattern = '^gh_.*_linux_amd64\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["bin/gh"]
+desktop = false
+terminal = true
+
+[[package]]
+id = "git-delta"
+name = "delta"
+description = "Syntax-highlighting pager for Git, diff, and grep output."
+category = "Developer Tools"
+url = "https://github.com/dandavison/delta"
+source_type = "github"
+asset_pattern = '^delta-.*-x86_64-unknown-linux-musl\.tar\.gz$'
+architectures = ["x86_64"]
+executables = ["delta"]
 desktop = false
 terminal = true
 
@@ -346,6 +450,20 @@ architectures = ["x86_64"]
 executables = ["AppRun", "qbittorrent"]
 
 [[package]]
+id = "stremio"
+name = "Stremio (legacy)"
+description = "Legacy Stremio 4 package retained only so existing installations can be removed."
+category = "Media"
+url = "https://dl.strem.io/shell-linux/v4.4.168/stremio_4.4.168-1_amd64.deb"
+source_type = "deb"
+architectures = ["x86_64"]
+executables = ["opt/stremio/stremio"]
+icons = ["opt/stremio/icons/smartcode-stremio_128.png"]
+version = "4.4.168"
+enabled = false
+notes = "Disabled: requires obsolete libcrypto.so.1.1 and libmpv.so.1; Stremio 5 for Linux is distributed through Flatpak."
+
+[[package]]
 id = "blender"
 name = "Blender"
 description = "Open-source 3D creation suite."
@@ -383,7 +501,6 @@ executables = ["opt/Obsidian/obsidian"]
 
 # Intentionally not migrated: the former Chromium snapshot endpoint returned an
 # opaque ZIP without stable metadata; Atom is end-of-life; the former Android
-# URL contained temporary tracking/host parameters; the unknown "antigravity"
-# payload was not sufficiently attributable; and old pinned Midori, Waterfox,
-# SeaMonkey, Opera, Min, Steam, Stremio, Floorp, and Mullvad URLs need individual
-# upstream verification before they can be enabled safely.
+# URL contained temporary tracking/host parameters; and old pinned Midori,
+# Waterfox, SeaMonkey, Opera, Min, Steam, Floorp, and Mullvad URLs need
+# individual upstream verification before they can be enabled safely.

@@ -66,6 +66,13 @@ def test_desktop_entry_quotes_paths_with_spaces(tmp_path: Path) -> None:
     assert "Terminal=false" in content
     assert "--profile" not in content
     assert "XDG_CONFIG_HOME" not in content
+    assert "Categories=Development;" in content
+
+
+def test_desktop_entry_uses_package_category(tmp_path: Path) -> None:
+    executable = tmp_path / "browser"
+    content = desktop_entry(package(category="Browsers"), executable)
+    assert "Categories=Network;WebBrowser;" in content
 
 
 def test_generated_integration_and_removal(monkeypatch, tmp_path: Path) -> None:

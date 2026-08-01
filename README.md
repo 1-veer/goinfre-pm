@@ -82,11 +82,14 @@ in the centralized project configuration.
 | `p` | Choose and persist install root |
 | `l` | Focus detailed logs |
 | `?` | Show help |
-| `q`, `Esc` | Quit when no modal is active |
+| `Esc` | Close search/modal or move back to categories |
+| `q` | Quit when no operation is active |
 
 The layout hides lower-priority navigation/details panels at small terminal
 widths and remains usable around 80×24. Mutating actions are blocked while a
-worker is active. Removal confirmations leave user configuration intact.
+worker is active, and quitting waits for the worker to finish. The focused
+category or package pane has a bright border and an `ACTIVE` title. Removal
+confirmations leave user configuration intact.
 
 ## Command-line interface
 
@@ -132,6 +135,7 @@ icons = ["share/icons/example.png"]
 desktop = false
 terminal = true
 version = "latest"
+enabled = true
 ```
 
 Supported source types cover Debian archives (`dpkg -x`), AppImages, tar.gz,
@@ -140,6 +144,10 @@ Identifiers must be lowercase, path-safe, and unique. Architecture is checked
 before download. GitHub `asset_pattern` should narrowly select the correct Linux
 asset. Direct pinned URLs in the catalog carry review notes when they may be
 stale.
+
+Set `enabled = false` for a retired entry that must remain known so an existing
+installation can still be repaired or removed. Disabled packages are hidden
+from the available catalog, rejected on install, and skipped during restore.
 
 Optional post-install behavior is limited to structured `chmod` and internal
 `symlink` actions. Legacy configuration migration is available through
@@ -210,9 +218,11 @@ commands, PATH, state, integrations, catalog validity, and architecture.
   `export PATH="$HOME/.local/bin:$PATH"`.
 - **Application does not launch:** inspect `<root>/logs/<package>.log`, run
   `gpm doctor`, then `gpm repair`.
+- **The TUI closes unexpectedly:** inspect `~/.config/goinfre-pm/crash.log`.
+  Unexpected failures are recorded there without dumping a traceback over the
+  terminal interface.
 - **Stale package URL:** update only that package entry after verifying the
   publisher and architecture.
 
-The project is MIT-licensed; see `LICENSE`. `NOTICE.md` records the cautious
-provenance of the supplied code and historical inspiration without claiming
-that all inherited work was originally written by the current maintainer.
+The project stays MIT-licensed so anyone can legally use, modify, and share this
+casual tool. See `LICENSE`; third-party packages keep their own terms.

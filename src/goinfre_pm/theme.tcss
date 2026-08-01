@@ -14,13 +14,16 @@ Screen { background: $gpm-background; color: $gpm-text; }
 #brand { width: 22; color: $gpm-lavender; text-style: bold; content-align: left middle; }
 #storage { width: 1fr; color: $gpm-muted; content-align: right middle; }
 #body { height: 1fr; }
-.panel { background: $gpm-panel; border: round #49325e; }
+.panel { background: $gpm-panel; border: round #49325e; border-title-color: $gpm-muted; }
+.panel:focus-within { border: heavy $gpm-violet; border-title-color: $gpm-text; }
 #categories { width: 22; min-width: 16; }
 #categories OptionList { height: 1fr; background: $gpm-panel; border: none; }
 #categories OptionList > .option-list--option-highlighted { background: #4c1d70; color: $gpm-text; }
+#categories OptionList:focus > .option-list--option-highlighted { background: $gpm-violet; color: $gpm-background; text-style: bold; }
 #catalog { width: 2fr; min-width: 38; }
 #package-table { height: 1fr; background: $gpm-panel; }
 #package-table > .datatable--cursor { background: #5b2182; color: $gpm-text; }
+#package-table:focus > .datatable--cursor { background: $gpm-violet; color: $gpm-background; text-style: bold; }
 #details { width: 1fr; min-width: 26; padding: 1; color: $gpm-text; }
 #details-title { height: 2; color: $gpm-lavender; text-style: bold; }
 #details-body { height: 1fr; color: $gpm-muted; }
