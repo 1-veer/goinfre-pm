@@ -1,0 +1,39 @@
+{
+  "name": "goinfre-pm",
+  "version": "1.2.0",
+  "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
+  "license": "MIT",
+  "author": "Ayoub Bougatia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1-veer/goinfre-pm.git"
+  },
+  "homepage": "https://github.com/1-veer/goinfre-pm#readme",
+  "bugs": {
+    "url": "https://github.com/1-veer/goinfre-pm/issues"
+  },
+  "bin": {
+    "goinfre-pm": "npm/bin/goinfre-pm.js",
+    "gpm": "npm/bin/goinfre-pm.js"
+  },
+  "files": [
+    "npm/",
+    "src/",
+    "install.sh",
+    "packages.toml",
+    "pyproject.toml",
+    "requirements.txt",
+    "README.md",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "engines": {
+    "node": ">=12"
+  },
+  "scripts": {
+    "test": "node --check npm/bin/goinfre-pm.js && node npm/bin/goinfre-pm.js --requirements"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
