@@ -1,5 +1,5 @@
 #!/bin/sh
-# Safe, idempotent installer. Application payloads and Python live in goinfre.
+# Safe, idempotent installer. The manager persists locally; app payloads use goinfre.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -22,6 +22,12 @@ command -v python3 >/dev/null 2>&1 || die "Python 3 is required."
 command -v curl >/dev/null 2>&1 || die "curl is required for dependency/network checks."
 python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || die "Python 3.10 or newer is required."
 python3 -m venv --help >/dev/null 2>&1 || die "The Python venv module is unavailable."
+
+# Keep the comparatively small manager available when campus goinfre storage
+# changes. Downloaded/extracted applications remain in the selected goinfre root.
+MANAGER_HOME=$HOME/.local/share/$PROJECT_SLUG
+MANAGER_VENV=$MANAGER_HOME/venv
+MANAGER_RUNTIME=$MANAGER_HOME/runtime
 
 writable_dir() {
     [ -d "$1" ] && [ -w "$1" ] && [ -x "$1" ]
@@ -64,8 +70,16 @@ choose_root() {
             die "No writable goinfre root found. Set GPM_INSTALL_ROOT or GOINFRE and retry."
         fi
     fi
-    mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/runtime" "$GPM_ROOT/logs" || die "Cannot create storage layout at $GPM_ROOT"
+    mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs" || die "Cannot create storage layout at $GPM_ROOT"
 }
+
+if [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
+    info "Removing the local package-manager runtime; application payloads and state are retained."
+    rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
+    rm -rf "$MANAGER_HOME"
+    ok "$PROJECT_DISPLAY_NAME runtime removed."
+    exit 0
+fi
 
 choose_root
 case "$GPM_ROOT" in
@@ -73,13 +87,11 @@ case "$GPM_ROOT" in
 esac
 
 if [ "${1:-}" = "uninstall" ]; then
-    info "Removing the package-manager runtime; installed applications and state are retained."
+    info "Removing the manager and explicitly purging goinfre application data."
     rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
-    rm -rf "$GPM_ROOT/venv" "$GPM_ROOT/runtime"
-    if [ "${2:-}" = "--purge-data" ]; then
-        warn "Purging application payloads because --purge-data was explicitly supplied."
-        rm -rf "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs"
-    fi
+    rm -rf "$MANAGER_HOME"
+    warn "Purging application payloads because --purge-data was explicitly supplied."
+    rm -rf "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs"
     ok "$PROJECT_DISPLAY_NAME runtime removed."
     exit 0
 fi
@@ -95,35 +107,45 @@ fi
 info "Install root: $GPM_ROOT"
 info "Available space: $((FREE_KB / 1024)) MiB"
 
-if [ ! -x "$GPM_ROOT/venv/bin/python" ]; then
-    info "Creating Python environment in goinfre"
-    python3 -m venv "$GPM_ROOT/venv" || die "Failed to create the virtual environment."
+mkdir -p "$MANAGER_RUNTIME"
+
+if [ ! -x "$MANAGER_VENV/bin/python" ]; then
+    info "Creating persistent Python environment in $MANAGER_VENV"
+    python3 -m venv "$MANAGER_VENV" || die "Failed to create the virtual environment."
 fi
 
 if ! curl -fsSI --connect-timeout 8 --max-time 15 https://pypi.org/simple/textual/ >/dev/null 2>&1; then
-    if ! "$GPM_ROOT/venv/bin/python" -c 'import textual' >/dev/null 2>&1; then
-        die "PyPI is unreachable and Textual is not already installed in the goinfre environment."
+    if ! "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
+        die "PyPI is unreachable and Textual is not already installed in the persistent environment."
     fi
     warn "PyPI is unreachable; reusing the installed dependency set."
-    SITE_PACKAGES=$("$GPM_ROOT/venv/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
-    "$GPM_ROOT/venv/bin/python" -c 'import pathlib,shutil,sys; source=pathlib.Path(sys.argv[1]).resolve(); base=pathlib.Path(sys.argv[2]).resolve(); target=base/sys.argv[3]; target.resolve(strict=False).relative_to(base); shutil.rmtree(target,ignore_errors=True); shutil.copytree(source,target)' "$SCRIPT_DIR/src/$PROJECT_MODULE" "$SITE_PACKAGES" "$PROJECT_MODULE" || die "Offline project update failed."
+    SITE_PACKAGES=$("$MANAGER_VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+    "$MANAGER_VENV/bin/python" -c 'import pathlib,shutil,sys; source=pathlib.Path(sys.argv[1]).resolve(); base=pathlib.Path(sys.argv[2]).resolve(); target=base/sys.argv[3]; target.resolve(strict=False).relative_to(base); shutil.rmtree(target,ignore_errors=True); shutil.copytree(source,target)' "$SCRIPT_DIR/src/$PROJECT_MODULE" "$SITE_PACKAGES" "$PROJECT_MODULE" || die "Offline project update failed."
 else
     info "Installing pinned dependencies and project files"
-    "$GPM_ROOT/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$SCRIPT_DIR" || die "Python dependency installation failed."
+    "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check --upgrade "$SCRIPT_DIR" || die "Python dependency installation failed."
 fi
 
-cp "$SCRIPT_DIR/packages.toml" "$GPM_ROOT/runtime/packages.toml"
-cp "$BRANDING_FILE" "$GPM_ROOT/runtime/project.conf"
+cp "$SCRIPT_DIR/packages.toml" "$MANAGER_RUNTIME/packages.toml"
+cp "$BRANDING_FILE" "$MANAGER_RUNTIME/project.conf"
 mkdir -p "$HOME/.config/$PROJECT_SLUG" "$HOME/.local/bin"
 python3 -c 'import json,os,sys,tempfile; target=sys.argv[1]; fd,tmp=tempfile.mkstemp(prefix=".config.", dir=os.path.dirname(target)); f=os.fdopen(fd,"w",encoding="utf-8"); json.dump({"install_root":sys.argv[2]},f,indent=2); f.write("\n"); f.close(); os.replace(tmp,target)' "$HOME/.config/$PROJECT_SLUG/config.json" "$GPM_ROOT"
 
 LAUNCHER=$HOME/.local/bin/$PROJECT_COMMAND
 {
     printf '%s\n' '#!/bin/sh'
-    printf '%s\n' "export GPM_PACKAGES_FILE='$GPM_ROOT/runtime/packages.toml'"
-    printf '%s\n' "exec '$GPM_ROOT/venv/bin/python' -m $PROJECT_MODULE \"\$@\""
+    printf '%s\n' "export GPM_PACKAGES_FILE='$MANAGER_RUNTIME/packages.toml'"
+    printf '%s\n' "exec '$MANAGER_VENV/bin/python' -m $PROJECT_MODULE \"\$@\""
 } > "$LAUNCHER"
 chmod 755 "$LAUNCHER"
+"$LAUNCHER" version >/dev/null 2>&1 || die "The new local launcher failed its startup check."
+
+# Versions before 1.1.1 placed the manager itself in goinfre. Only reclaim
+# those obsolete copies after the persistent launcher has passed startup.
+if [ -d "$GPM_ROOT/venv" ] || [ -d "$GPM_ROOT/runtime" ]; then
+    rm -rf "$GPM_ROOT/venv" "$GPM_ROOT/runtime"
+    ok "Removed obsolete manager runtime from goinfre"
+fi
 
 append_path() {
     rcfile=$1
@@ -148,6 +170,7 @@ append_path "$HOME/.config/fish/config.fish" 'fish_add_path -g $HOME/.local/bin'
 
 printf '\n%b%s %s installed%b\n' "$BOLD$VIOLET" "$PROJECT_DISPLAY_NAME" "$PROJECT_VERSION" "$RESET"
 ok "Command: $LAUNCHER"
+ok "Persistent manager: $MANAGER_HOME"
 ok "Large storage: $GPM_ROOT"
 printf 'Open a new terminal, then run: %b%s%b\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"
 printf 'Optional login restore: %b%s autostart enable%b\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"

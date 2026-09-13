@@ -2,8 +2,9 @@
 
 GoinfrePM is a terminal package manager for Ubuntu-based 1337/42 workstations.
 It downloads and extracts large applications into writable goinfre storage and
-keeps only small state, launchers, icons, and command links in the home
-directory. It does not install system packages or require administrator access.
+keeps the package-manager runtime, small state, launchers, icons, and command
+links in the home directory. It does not install system packages or require
+administrator access.
 
 > Project identity is centralized in
 > `src/goinfre_pm/project.conf`. Replace the repository placeholder there before
@@ -29,13 +30,15 @@ No large-payload fallback is silently created in ordinary home storage.
 <selected-root>/
 ├── apps/       # extracted applications
 ├── downloads/  # operation-scoped temporary downloads
-├── runtime/    # catalog and runtime metadata
-├── venv/       # pinned Python environment
 └── logs/       # per-package logs
 ```
 
-Small files live under `~/.config/goinfre-pm`, `~/.local/bin`,
-`~/.local/share/applications`, and `~/.local/share/icons`.
+The persistent manager lives at `~/.local/share/goinfre-pm`, and its launcher
+lives at `~/.local/bin/gpm`. Small state and desktop integration live under
+`~/.config/goinfre-pm`, `~/.local/share/applications`, and
+`~/.local/share/icons`. This lets `gpm` start after changing workstations even
+when the previous workstation's goinfre storage is unavailable; select the new
+goinfre path and run `gpm restore` to restore only desired applications.
 
 ## Prerequisites and installation
 
@@ -48,8 +51,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer prefers these local files, creates the virtual environment in
-goinfre, installs pinned dependencies, creates `~/.local/bin/gpm`, and adds
+The installer prefers these local files, creates the small persistent virtual
+environment under `~/.local/share/goinfre-pm`, installs pinned dependencies,
+creates `~/.local/bin/gpm`, and adds
 `~/.local/bin` to Bash, Zsh, and Fish configuration exactly once. Existing
 shell files are backed up before modification. Open a new terminal and run:
 
@@ -66,6 +70,11 @@ GPM_INSTALL_ROOT="/path with spaces/goinfre-pm" ./install.sh
 Running `./install.sh` again updates the existing environment and launcher.
 The repository URL is currently the intentional publishing placeholder shown
 in the centralized project configuration.
+
+Versions before 1.1.1 stored the manager environment in goinfre. The first
+1.1.1 installation creates the persistent local runtime successfully and then
+removes those obsolete goinfre runtime directories; application payloads and
+state are not removed.
 
 ## TUI controls
 
@@ -165,8 +174,8 @@ git pull --ff-only
 ./install.sh
 ```
 
-This updates the goinfre virtual environment, application code, catalog, and
-`~/.local/bin/gpm` launcher while retaining installed applications, desired
+This updates the persistent local virtual environment, application code,
+catalog, and `~/.local/bin/gpm` launcher while retaining installed applications, desired
 package state, and user configuration. For an existing Zen installation, first
 repair its command link without downloading it again. If it still fails, replace
 the payload from the corrected official latest-release URL:
@@ -183,8 +192,9 @@ replacement is staged and rolled back if integration fails.
 ./install.sh uninstall
 ```
 
-That removes the manager runtime and `gpm` launcher but retains applications
-and state. `./install.sh uninstall --purge-data` also removes application
+That removes the local manager runtime and `gpm` launcher even when goinfre is
+unavailable, but retains applications and state. `./install.sh uninstall
+--purge-data` also removes application
 payload directories from the selected root. Shell PATH lines and small state
 are deliberately retained for safety and possible reinstall.
 
