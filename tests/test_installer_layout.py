@@ -7,3 +7,15 @@ def test_launcher_uses_persistent_local_runtime() -> None:
     assert 'exec \'$MANAGER_VENV/bin/python\'' in installer
     assert "GPM_PACKAGES_FILE='$MANAGER_RUNTIME/packages.toml'" in installer
     assert 'exec \'$GPM_ROOT/venv/bin/python\'' not in installer
+
+
+def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
+    installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
+
+    assert "python3 -m venv --without-pip" in installer
+    assert "PIP_BOOTSTRAP_SHA256=" in installer
+    assert "PYTHONPATH=$PIP_BOOTSTRAP_WHEEL" in installer
+    assert '"$MANAGER_VENV/bin/python" -m pip --version' in installer
+    assert "require_command curl" not in installer
+    assert "require_command dpkg" not in installer
+    assert "sudo apt" not in installer

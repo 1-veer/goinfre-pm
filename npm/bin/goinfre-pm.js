@@ -43,24 +43,20 @@ function printRequirements() {
   process.stdout.write([
     `${displayName} target: Ubuntu 22.04 (x86_64)`,
     "",
-    "To obtain npx, install Node.js and npm:",
-    "  sudo apt update",
-    "  sudo apt install -y nodejs npm",
-    "",
-    `${displayName} itself also needs:`,
-    "  sudo apt install -y python3 python3-venv curl ca-certificates dpkg",
-    "",
-    "Verify the tools:",
+    "Required before running this npx bootstrap:",
     "  node --version",
     "  npm --version",
     "  npx --version",
-    "  python3 --version",
-    "  python3 -m venv --help",
-    "  curl --version",
-    "  dpkg --version",
     "",
-    "The bootstrap never runs sudo or apt. On a managed 1337/42 computer where",
-    "you do not have sudo, ask school staff to install the missing Ubuntu packages.",
+    `${displayName} requires the standard Ubuntu Python:`,
+    "  python3 --version    # must be 3.10 or newer",
+    "",
+    "No sudo, system pip, python3-venv, or curl is required. The installer creates",
+    "a private environment and bootstraps a pinned, SHA-256-verified pip wheel.",
+    "",
+    "dpkg is optional and only needed when installing a package distributed as .deb.",
+    "If Python or dpkg is missing, ask 1337/42 staff to restore the standard Ubuntu",
+    "workstation tools; this bootstrap never runs sudo or apt.",
     "",
   ].join("\n"));
 }
@@ -69,14 +65,6 @@ function missingRequirements() {
   const missing = [];
   if (!works("python3", ["-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"])) {
     missing.push("Python 3.10 or newer");
-  } else if (!works("python3", ["-m", "venv", "--help"])) {
-    missing.push("the python3-venv module");
-  }
-  if (!works("curl", ["--version"])) {
-    missing.push("curl");
-  }
-  if (!works("dpkg", ["--version"])) {
-    missing.push("dpkg");
   }
   return missing;
 }

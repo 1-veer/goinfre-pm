@@ -86,19 +86,11 @@ npx --yes goinfre-pm@latest --uninstall-manager
 
 ## Prerequisites
 
-The supported target is Ubuntu 22.04 on x86_64. If `npx` is unavailable, install
-Node.js and npm first:
-
-```sh
-sudo apt update
-sudo apt install -y nodejs npm
-```
-
-Install the GoinfrePM runtime prerequisites if they are unavailable:
-
-```sh
-sudo apt install -y python3 python3-venv curl ca-certificates dpkg
-```
+The supported target is Ubuntu 22.04 on x86_64. The workstation needs Node.js
+and npm to provide `npx`, plus the standard Ubuntu Python 3.10 or newer. No
+sudo, system pip, `python3-venv`, or curl is required. The installer creates its
+private environment with `--without-pip`, then bootstraps a pinned pip wheel
+from official PyPI and verifies its SHA-256 before using it.
 
 Verify the result with:
 
@@ -107,17 +99,15 @@ node --version
 npm --version
 npx --version
 python3 --version
-python3 -m venv --help
-curl --version
 dpkg --version
 ```
 
-Ubuntu 22.04 supplies Python 3.10 by default. GoinfrePM and its npm bootstrap do
-not invoke `sudo` or `apt` themselves. On a managed 1337/42 workstation where
-students do not have administrator rights, ask school staff to install any
-missing system package. Network access to npm and PyPI is required on the first
-installation, and at least 256 MiB must be free before installation (individual
-applications need more).
+`dpkg` is optional and only needed for applications distributed as `.deb`.
+GoinfrePM and its npm bootstrap never invoke `sudo` or `apt`. If Node, Python,
+or `dpkg` is missing from a managed workstation, ask school staff to restore
+that standard Ubuntu tool. Network access to npm and PyPI is required on the
+first installation, and at least 256 MiB must be free before installation
+(individual applications need more).
 
 To print this list without installing GoinfrePM, run:
 
@@ -315,6 +305,9 @@ commands, PATH, state, integrations, catalog validity, and architecture.
   `gpm path set "/your/writable/goinfre-pm"`.
 - **Command not found:** open a new shell or temporarily run
   `export PATH="$HOME/.local/bin:$PATH"`.
+- **A previous install says `No module named pip`:** run
+  `npx --yes goinfre-pm@latest` again. Version 1.2.1 and newer detects and
+  repairs the incomplete environment without sudo.
 - **Application does not launch:** inspect `<root>/logs/<package>.log`, run
   `gpm doctor`, then `gpm repair`.
 - **The TUI closes unexpectedly:** inspect `~/.config/goinfre-pm/crash.log`.
