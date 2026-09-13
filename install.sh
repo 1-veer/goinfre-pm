@@ -18,16 +18,47 @@ ok() { printf "%b[OK]%b %s\n" "$GREEN" "$RESET" "$1"; }
 warn() { printf "%b[WARN]%b %s\n" "$AMBER" "$RESET" "$1" >&2; }
 die() { printf "%b[ERROR]%b %s\n" "$RED" "$RESET" "$1" >&2; exit 1; }
 
-command -v python3 >/dev/null 2>&1 || die "Python 3 is required."
-command -v curl >/dev/null 2>&1 || die "curl is required for dependency/network checks."
-python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' || die "Python 3.10 or newer is required."
-python3 -m venv --help >/dev/null 2>&1 || die "The Python venv module is unavailable."
-
 # Keep the comparatively small manager available when campus goinfre storage
 # changes. Downloaded/extracted applications remain in the selected goinfre root.
 MANAGER_HOME=$HOME/.local/share/$PROJECT_SLUG
 MANAGER_VENV=$MANAGER_HOME/venv
 MANAGER_RUNTIME=$MANAGER_HOME/runtime
+
+# Removing the local manager must still work if goinfre or a system extraction
+# tool is unavailable. Application data and state are deliberately retained.
+if [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
+    info "Removing the local package-manager runtime; application payloads and state are retained."
+    rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
+    rm -rf "$MANAGER_HOME"
+    ok "$PROJECT_DISPLAY_NAME runtime removed."
+    exit 0
+fi
+
+prerequisite_help() {
+    printf '%s\n' 'On Ubuntu 22.04, an administrator can install the prerequisites with:' >&2
+    printf '%s\n' '  sudo apt update' >&2
+    printf '%s\n' '  sudo apt install -y python3 python3-venv curl ca-certificates dpkg' >&2
+    printf '%s\n' 'This installer never runs sudo. On managed school computers, ask staff if a package is missing.' >&2
+}
+
+require_command() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        prerequisite_help
+        die "$2"
+    fi
+}
+
+require_command python3 "Python 3.10 or newer is required."
+require_command curl "curl is required for dependency and network checks."
+require_command dpkg "dpkg is required to extract Debian packages."
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+    prerequisite_help
+    die "Python 3.10 or newer is required."
+fi
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    prerequisite_help
+    die "The Python venv module is unavailable (install python3-venv)."
+fi
 
 writable_dir() {
     [ -d "$1" ] && [ -w "$1" ] && [ -x "$1" ]
@@ -72,14 +103,6 @@ choose_root() {
     fi
     mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs" || die "Cannot create storage layout at $GPM_ROOT"
 }
-
-if [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
-    info "Removing the local package-manager runtime; application payloads and state are retained."
-    rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
-    rm -rf "$MANAGER_HOME"
-    ok "$PROJECT_DISPLAY_NAME runtime removed."
-    exit 0
-fi
 
 choose_root
 case "$GPM_ROOT" in

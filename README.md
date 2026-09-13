@@ -6,9 +6,8 @@ keeps the package-manager runtime, small state, launchers, icons, and command
 links in the home directory. It does not install system packages or require
 administrator access.
 
-> Project identity is centralized in
-> `src/goinfre_pm/project.conf`. Replace the repository placeholder there before
-> publishing a fork.
+> Project identity is centralized in `src/goinfre_pm/project.conf`, while npm's
+> required publishing metadata lives in `package.json`.
 
 ![TUI screenshot placeholder](docs/tui-screenshot-placeholder.svg)
 
@@ -16,8 +15,8 @@ administrator access.
 
 School home-directory quotas are small, while `/goinfre` (or the campus-provided
 `~/goinfre` link) is intended for larger temporary data. GoinfrePM keeps app
-payloads and its Python environment there, while integrating applications with
-the desktop and shell without changing the operating system.
+payloads there, while its small local manager integrates applications with the
+desktop and shell without changing the operating system.
 
 ## Storage layout
 
@@ -40,11 +39,95 @@ lives at `~/.local/bin/gpm`. Small state and desktop integration live under
 when the previous workstation's goinfre storage is unavailable; select the new
 goinfre path and run `gpm restore` to restore only desired applications.
 
-## Prerequisites and installation
+## Quick installation with npx
 
-You need Ubuntu 22.04 or similar, Python 3.10+, its `venv` module, `curl`,
-`dpkg`, network access to PyPI, and at least 256 MiB free for installation
-(applications need more). From a local checkout:
+After the `goinfre-pm` package has been published to npm, a peer can install or
+update the manager and immediately open it with:
+
+```sh
+npx goinfre-pm
+```
+
+The first form may ask for confirmation before npm downloads the package. To
+accept that prompt non-interactively and explicitly request the newest release:
+
+```sh
+npx --yes goinfre-pm@latest
+```
+
+Arguments are forwarded to the installed `gpm` command, so non-interactive use
+works too:
+
+```sh
+npx --yes goinfre-pm@latest doctor
+npx --yes goinfre-pm@latest install zen-browser
+```
+
+The npm package contains the project files. It checks the workstation, runs the
+same idempotent `install.sh`, creates `~/.local/bin/gpm`, and then launches it.
+When the same GoinfrePM version is already installed, it skips installation and
+starts `gpm` directly. Use `--reinstall` only to force a repair of the manager:
+
+```sh
+npx --yes goinfre-pm@latest --reinstall doctor
+```
+
+`npx` is a bootstrap convenience, not the place where applications live. App
+payloads remain in goinfre, and the small manager remains under
+`~/.local/share/goinfre-pm`. After the first run, simply use `gpm` from any
+directory.
+
+To remove only the locally installed manager while retaining applications and
+state:
+
+```sh
+npx --yes goinfre-pm@latest --uninstall-manager
+```
+
+## Prerequisites
+
+The supported target is Ubuntu 22.04 on x86_64. If `npx` is unavailable, install
+Node.js and npm first:
+
+```sh
+sudo apt update
+sudo apt install -y nodejs npm
+```
+
+Install the GoinfrePM runtime prerequisites if they are unavailable:
+
+```sh
+sudo apt install -y python3 python3-venv curl ca-certificates dpkg
+```
+
+Verify the result with:
+
+```sh
+node --version
+npm --version
+npx --version
+python3 --version
+python3 -m venv --help
+curl --version
+dpkg --version
+```
+
+Ubuntu 22.04 supplies Python 3.10 by default. GoinfrePM and its npm bootstrap do
+not invoke `sudo` or `apt` themselves. On a managed 1337/42 workstation where
+students do not have administrator rights, ask school staff to install any
+missing system package. Network access to npm and PyPI is required on the first
+installation, and at least 256 MiB must be free before installation (individual
+applications need more).
+
+To print this list without installing GoinfrePM, run:
+
+```sh
+npx --yes goinfre-pm@latest --requirements
+```
+
+## Installation from a clone
+
+The npm route is optional. From a local checkout:
 
 ```sh
 chmod +x install.sh
@@ -68,11 +151,9 @@ GPM_INSTALL_ROOT="/path with spaces/goinfre-pm" ./install.sh
 ```
 
 Running `./install.sh` again updates the existing environment and launcher.
-The repository URL is currently the intentional publishing placeholder shown
-in the centralized project configuration.
 
-Versions before 1.1.1 stored the manager environment in goinfre. The first
-1.1.1 installation creates the persistent local runtime successfully and then
+Versions before 1.1.1 stored the manager environment in goinfre. Installing
+1.1.1 or newer creates the persistent local runtime successfully and then
 removes those obsolete goinfre runtime directories; application payloads and
 state are not removed.
 
@@ -165,7 +246,15 @@ and disabled, never executed.
 
 ## Updating and uninstalling
 
-After pushing project changes, do not clone the repository again on each school
+For npm users, rerun the npx command after the maintainer publishes a new
+version. It detects the version change, updates the local manager, and preserves
+applications and state:
+
+```sh
+npx --yes goinfre-pm@latest
+```
+
+For users who installed from a clone, do not clone it again on each school
 machine. Update the existing checkout and rerun the idempotent installer:
 
 ```sh
@@ -236,3 +325,23 @@ commands, PATH, state, integrations, catalog validity, and architecture.
 
 The project stays MIT-licensed so anyone can legally use, modify, and share this
 casual tool. See `LICENSE`; third-party packages keep their own terms.
+
+## Publishing the npx bootstrap (maintainer only)
+
+The npm name `goinfre-pm` was unclaimed when this wrapper was added, but registry
+names are first-come, first-served. Publishing is a separate authenticated step;
+committing or pushing to GitHub does not publish npm automatically.
+
+Before each release, keep the version identical in `package.json`,
+`pyproject.toml`, and `src/goinfre_pm/project.conf`, run the checks, then:
+
+```sh
+npm login
+npm whoami
+npm pack --dry-run
+npm publish --access public
+```
+
+For the next release, increment all three versions first; npm will reject reuse
+of an already published version. Never publish from an untrusted checkout or
+commit npm access tokens to this repository.
