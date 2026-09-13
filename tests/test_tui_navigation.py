@@ -1,6 +1,6 @@
 import asyncio
 
-from textual.widgets import DataTable, Input, OptionList
+from textual.widgets import Button, DataTable, Input, OptionList
 
 from goinfre_pm import app as app_module
 from goinfre_pm.models import Package
@@ -53,5 +53,17 @@ def test_arrow_focus_and_space_preserve_package(monkeypatch, tmp_path) -> None:
             await pilot.press("q")
             assert app.is_running
             app.busy = False
+
+            table.focus()
+            await pilot.press("r")
+            assert isinstance(app.screen, app_module.ConfirmModal)
+            assert app.screen.query_one("#confirm", Button).has_focus
+            await pilot.press("right")
+            assert app.screen.query_one("#cancel", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, app_module.ConfirmModal)
+            assert app.query_one(DataTable)
+            assert app.is_running
 
     asyncio.run(scenario())

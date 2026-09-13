@@ -21,17 +21,15 @@ class Layout:
     root: Path
     apps: Path
     downloads: Path
-    runtime: Path
-    venv: Path
     logs: Path
 
     @classmethod
     def at(cls, root: Path) -> "Layout":
         root = root.expanduser().resolve()
-        return cls(root, root / "apps", root / "downloads", root / "runtime", root / "venv", root / "logs")
+        return cls(root, root / "apps", root / "downloads", root / "logs")
 
     def create(self) -> None:
-        for path in (self.root, self.apps, self.downloads, self.runtime, self.logs):
+        for path in (self.root, self.apps, self.downloads, self.logs):
             path.mkdir(parents=True, exist_ok=True)
 
 

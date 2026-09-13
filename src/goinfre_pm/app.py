@@ -36,6 +36,18 @@ class ConfirmModal(ModalScreen[bool]):
                 yield Button("Confirm", variant="error", id="confirm")
                 yield Button("Cancel", id="cancel")
 
+    def on_mount(self) -> None:
+        self.query_one("#confirm", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        """Move between modal buttons without leaking arrows to the app."""
+        buttons = list(self.query(Button))
+        if not buttons:
+            return
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "confirm")
 
@@ -259,12 +271,22 @@ class GoinfrePMApp(App[None]):
             self.query_one(DataTable).action_cursor_up()
 
     def action_focus_packages(self) -> None:
+        if isinstance(self.screen, ConfirmModal):
+            self.screen.focus_button(1)
+            return
+        if isinstance(self.screen, ModalScreen):
+            return
         table = self.query_one(DataTable)
         if self.visible_packages:
             table.focus()
             self._set_active_pane("catalog")
 
     def action_focus_categories(self) -> None:
+        if isinstance(self.screen, ConfirmModal):
+            self.screen.focus_button(-1)
+            return
+        if isinstance(self.screen, ModalScreen):
+            return
         categories = self.query_one(OptionList)
         if categories.display:
             categories.focus()
