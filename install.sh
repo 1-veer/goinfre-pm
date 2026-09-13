@@ -35,10 +35,9 @@ if [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
 fi
 
 prerequisite_help() {
-    printf '%s\n' 'On Ubuntu 22.04, an administrator can install the prerequisites with:' >&2
-    printf '%s\n' '  sudo apt update' >&2
-    printf '%s\n' '  sudo apt install -y python3 python3-venv curl ca-certificates dpkg' >&2
-    printf '%s\n' 'This installer never runs sudo. On managed school computers, ask staff if a package is missing.' >&2
+    printf '%s\n' 'GoinfrePM only requires the system Python 3.10+ supplied by Ubuntu 22.04.' >&2
+    printf '%s\n' 'It bootstraps pip privately and does not require sudo, python3-venv, or system pip.' >&2
+    printf '%s\n' 'If python3 is unavailable, ask 1337/42 staff to restore the standard workstation Python.' >&2
 }
 
 require_command() {
@@ -49,16 +48,82 @@ require_command() {
 }
 
 require_command python3 "Python 3.10 or newer is required."
-require_command curl "curl is required for dependency and network checks."
-require_command dpkg "dpkg is required to extract Debian packages."
 if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
     prerequisite_help
     die "Python 3.10 or newer is required."
 fi
-if ! python3 -m venv --help >/dev/null 2>&1; then
-    prerequisite_help
-    die "The Python venv module is unavailable (install python3-venv)."
-fi
+
+# Ubuntu may ship the stdlib venv module without ensurepip. A pinned pip wheel
+# lets us create and repair a private environment without python3-venv, system
+# pip, curl, sudo, or arbitrary bootstrap scripts.
+PIP_BOOTSTRAP_VERSION=24.3.1
+PIP_BOOTSTRAP_SHA256=3790624780082365f47549d032f3770eeb2b1e8bd1f7b2e02dace1afa361b4ed
+PIP_BOOTSTRAP_URL=https://files.pythonhosted.org/packages/ef/7d/500c9ad20238fcfcb4cb9243eede163594d7020ce87bd9610c9e02771876/pip-24.3.1-py3-none-any.whl
+PIP_BOOTSTRAP_DIR=$MANAGER_RUNTIME/bootstrap
+PIP_BOOTSTRAP_WHEEL=$PIP_BOOTSTRAP_DIR/pip-$PIP_BOOTSTRAP_VERSION-py3-none-any.whl
+
+pip_wheel_is_valid() {
+    [ -f "$PIP_BOOTSTRAP_WHEEL" ] && python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$PIP_BOOTSTRAP_WHEEL" | grep -F -x "$PIP_BOOTSTRAP_SHA256" >/dev/null 2>&1
+}
+
+download_pip_wheel() {
+    mkdir -p "$PIP_BOOTSTRAP_DIR"
+    if pip_wheel_is_valid; then
+        return
+    fi
+    rm -f "$PIP_BOOTSTRAP_WHEEL"
+    info "Downloading the verified private pip bootstrap"
+    if ! python3 - "$PIP_BOOTSTRAP_URL" "$PIP_BOOTSTRAP_WHEEL" "$PIP_BOOTSTRAP_SHA256" "$PROJECT_DISPLAY_NAME/$PROJECT_VERSION" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import secrets
+import sys
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+
+url, destination_text, expected, user_agent = sys.argv[1:]
+destination = Path(destination_text)
+temporary = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}.tmp")
+digest = hashlib.sha256()
+total = 0
+try:
+    request = Request(url, headers={"User-Agent": user_agent})
+    with urlopen(request, timeout=30) as response, temporary.open("xb") as output:
+        if urlparse(response.geturl()).scheme != "https":
+            raise RuntimeError("pip bootstrap redirected away from HTTPS")
+        while True:
+            chunk = response.read(64 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 10 * 1024 * 1024:
+                raise RuntimeError("pip bootstrap exceeded the 10 MiB safety limit")
+            digest.update(chunk)
+            output.write(chunk)
+    if digest.hexdigest() != expected:
+        raise RuntimeError("pip bootstrap SHA-256 verification failed")
+    os.replace(temporary, destination)
+except Exception:
+    temporary.unlink(missing_ok=True)
+    raise
+PY
+    then
+        die "Could not securely download the private pip bootstrap from PyPI. Check the network and retry."
+    fi
+    pip_wheel_is_valid || die "The private pip bootstrap download failed verification. Retry when PyPI is reachable."
+}
+
+ensure_private_pip() {
+    if "$MANAGER_VENV/bin/python" -m pip --version >/dev/null 2>&1; then
+        return
+    fi
+    info "Repairing the private Python environment without sudo"
+    download_pip_wheel
+    PYTHONPATH=$PIP_BOOTSTRAP_WHEEL "$MANAGER_VENV/bin/python" -m pip install \
+        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" \
+        || die "Failed to bootstrap pip inside the private environment."
+}
 
 writable_dir() {
     [ -d "$1" ] && [ -w "$1" ] && [ -x "$1" ]
@@ -134,19 +199,20 @@ mkdir -p "$MANAGER_RUNTIME"
 
 if [ ! -x "$MANAGER_VENV/bin/python" ]; then
     info "Creating persistent Python environment in $MANAGER_VENV"
-    python3 -m venv "$MANAGER_VENV" || die "Failed to create the virtual environment."
+    python3 -m venv --without-pip "$MANAGER_VENV" || die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
 fi
+ensure_private_pip
 
-if ! curl -fsSI --connect-timeout 8 --max-time 15 https://pypi.org/simple/textual/ >/dev/null 2>&1; then
-    if ! "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
-        die "PyPI is unreachable and Textual is not already installed in the persistent environment."
+info "Installing pinned dependencies and project files"
+if ! "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+    --no-cache-dir --timeout 20 --retries 2 --upgrade "$SCRIPT_DIR"; then
+    if "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
+        warn "PyPI is unreachable; reusing dependencies and updating local project files only."
+    else
+        die "Could not download the Python dependencies from PyPI. Check the network and retry."
     fi
-    warn "PyPI is unreachable; reusing the installed dependency set."
     SITE_PACKAGES=$("$MANAGER_VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
     "$MANAGER_VENV/bin/python" -c 'import pathlib,shutil,sys; source=pathlib.Path(sys.argv[1]).resolve(); base=pathlib.Path(sys.argv[2]).resolve(); target=base/sys.argv[3]; target.resolve(strict=False).relative_to(base); shutil.rmtree(target,ignore_errors=True); shutil.copytree(source,target)' "$SCRIPT_DIR/src/$PROJECT_MODULE" "$SITE_PACKAGES" "$PROJECT_MODULE" || die "Offline project update failed."
-else
-    info "Installing pinned dependencies and project files"
-    "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check --upgrade "$SCRIPT_DIR" || die "Python dependency installation failed."
 fi
 
 cp "$SCRIPT_DIR/packages.toml" "$MANAGER_RUNTIME/packages.toml"

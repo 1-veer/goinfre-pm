@@ -1,6 +1,6 @@
 {
   "name": "goinfre-pm",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
   "license": "MIT",
   "author": "veer",
@@ -18,7 +18,9 @@
   },
   "files": [
     "npm/",
-    "src/",
+    "src/goinfre_pm/*.py",
+    "src/goinfre_pm/*.tcss",
+    "src/goinfre_pm/project.conf",
     "install.sh",
     "packages.toml",
     "pyproject.toml",

@@ -16,7 +16,9 @@ def test_npm_package_contains_complete_local_installer() -> None:
     assert metadata["bin"]["gpm"] == "npm/bin/goinfre-pm.js"
     for required in (
         "npm/",
-        "src/",
+        "src/goinfre_pm/*.py",
+        "src/goinfre_pm/*.tcss",
+        "src/goinfre_pm/project.conf",
         "install.sh",
         "packages.toml",
         "pyproject.toml",
@@ -42,3 +44,6 @@ def test_npm_bootstrap_uses_argument_arrays_and_never_invokes_sudo() -> None:
     assert 'shell: true' not in bootstrap
     assert re.search(r'(?:run|spawnSync)\(\s*["\']sudo["\']', bootstrap) is None
     assert 'run("sh", [installer, "uninstall"]' in bootstrap
+    assert "sudo apt" not in bootstrap
+    assert 'works("curl"' not in bootstrap
+    assert 'works("dpkg"' not in bootstrap
