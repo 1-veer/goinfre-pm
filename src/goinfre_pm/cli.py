@@ -163,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
                         end="\r",
                     )
 
-                _emit(manager.install(identifier, progress_callback=cli_progress, transfer_callback=cli_transfer))
+                operation = manager.update if args.command == "update" else manager.install
+                _emit(operation(identifier, progress_callback=cli_progress, transfer_callback=cli_transfer))
         elif args.command == "remove":
             manager = _manager()
             for identifier in args.packages:

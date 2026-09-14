@@ -20,8 +20,14 @@ This file records recoverable checkpoints for the student-experience upgrade.
 
 ## Current validation
 
-- Release version synchronized at `1.4.0`.
+- Release version synchronized at `1.4.1`.
 - 78 Python tests pass on macOS, including 80×24 and 120×36 Textual pilots.
 - All 43 enabled catalog endpoints resolve; Obsidian's recent-stable fallback resolves its amd64 Debian asset; disabled legacy Stremio was skipped.
 - Packed npm contents are intentional (28 files), shell syntax and SVG parsing pass, and a clean isolated install plus idempotent rerun succeeded from paths containing spaces.
 - Ubuntu 22.04 GUI launch validation remains a Linux-machine release check; Docker is installed on the Mac but its daemon is not running. `shellcheck` is not installed locally.
+
+## 1.4.1 follow-up
+
+- [x] Replace the dot/circle row controls with clear checkbox markers and stars only for favorites.
+- [x] Label direct downloads as catalog-managed and failed GitHub checks as unavailable instead of “update unknown”.
+- [x] Prevent normal install actions from replacing installed payloads; retain replacement only through the explicit update command.

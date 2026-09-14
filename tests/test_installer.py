@@ -24,6 +24,40 @@ def test_disabled_package_cannot_be_installed(tmp_path: Path) -> None:
         next(manager.install("retired"))
 
 
+def test_install_rejects_an_already_installed_package(tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    (layout.apps / "tool").mkdir(parents=True)
+    manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+
+    with pytest.raises(RuntimeError, match="already installed.*update command"):
+        next(manager.install("tool"))
+
+
+def test_update_rejects_a_package_that_is_not_installed(tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+    )
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [package], StateStore(tmp_path / "state.json"))
+
+    with pytest.raises(RuntimeError, match="not installed.*install command"):
+        next(manager.update("tool"))
+
+
 def test_known_peak_size_is_checked_before_download(monkeypatch, tmp_path: Path) -> None:
     package = Package(
         identifier="large-tool",
@@ -160,7 +194,7 @@ def test_failed_download_does_not_remove_existing_install(monkeypatch, tmp_path:
     monkeypatch.setattr("goinfre_pm.integration.USER_BIN", user_bin)
 
     with pytest.raises(RuntimeError, match="offline"):
-        list(manager.install("tool"))
+        list(manager.update("tool"))
 
     assert executable.is_file()
     assert launcher.resolve() == executable.resolve()

@@ -472,8 +472,8 @@ class GoinfrePMApp(App[None]):
         table = self.query_one(DataTable)
         table.clear()
         for package in self.visible_packages:
-            favorite_marker = "[yellow]★[/yellow]" if package.identifier in favorites else "·"
-            selection_marker = "[bold #c4b5fd]●[/bold #c4b5fd]" if package.selected else "○"
+            favorite_marker = "[yellow]★[/yellow] " if package.identifier in favorites else "  "
+            selection_marker = "[bold #c4b5fd]☑[/bold #c4b5fd]" if package.selected else "[dim]☐[/dim]"
             marker = favorite_marker + selection_marker
             if package.identifier in installed:
                 update = self.update_info.get(package.identifier)
@@ -482,9 +482,13 @@ class GoinfrePMApp(App[None]):
                 elif package.identifier in self.update_available:
                     status = "[yellow]Update available[/yellow]"
                 elif update is None:
-                    status = "Installed · checking"
+                    status = "Installed · checking" if package.source_type == "github" else "[green]Installed[/green]"
                 elif update.status == "unknown":
-                    status = "[dim]Installed · update unknown[/dim]"
+                    status = (
+                        "[dim]Installed · check unavailable[/dim]"
+                        if package.source_type == "github"
+                        else "[green]Installed[/green]"
+                    )
                 else:
                     status = "[green]Installed[/green]"
             else:
@@ -539,14 +543,18 @@ class GoinfrePMApp(App[None]):
             size = package.installed_size
         size_text = human_size(size) if isinstance(size, int) else "unknown"
         update = self.update_info.get(package.identifier)
-        if update is None:
-            update_text = "checking" if package.identifier in state.get("installed", {}) else "not installed"
+        if package.identifier not in state.get("installed", {}):
+            update_text = "not installed"
+        elif package.source_type != "github":
+            update_text = "catalog-managed (automatic upstream check not available)"
+        elif update is None:
+            update_text = "checking"
         elif update.status == "available":
             update_text = f"{update.latest_version} available"
         elif update.status == "current":
             update_text = "current"
         else:
-            update_text = f"unknown ({update.reason})" if update.reason else "unknown"
+            update_text = f"check unavailable ({update.reason})" if update.reason else "check unavailable"
         self.query_one("#details-body", Static).update(
             f"[b]{package.name}[/b]\n\n{package.description}\n\n"
             f"Category: {package.category}\nSource: {package.source_type}\nArchitecture: {', '.join(package.architectures)}\n"
@@ -683,10 +691,15 @@ class GoinfrePMApp(App[None]):
         if self.busy:
             self.notify("Another operation is active", severity="warning")
             return
-        packages = [package for package in self.packages if package.selected]
+        selected = [package for package in self.packages if package.selected]
+        packages = [package for package in selected if not self.manager.installed(package.identifier)]
         if not packages:
-            self.notify("Your basket is empty", severity="warning")
+            message = "Selected packages are already installed" if selected else "Your basket is empty"
+            self.notify(message, severity="warning")
             return
+        skipped = len(selected) - len(packages)
+        if skipped:
+            self.notify(f"Skipped {skipped} already-installed package{'s' if skipped != 1 else ''}", severity="warning")
         installed = self.state.read().get("installed", {})
         try:
             free_space = available_space(self.layout.root)
@@ -756,7 +769,12 @@ class GoinfrePMApp(App[None]):
 
     def action_install_one(self) -> None:
         package = self._current()
-        if package:
+        if package and self.manager.installed(package.identifier):
+            self.notify(
+                f"{package.name} is already installed; use `gpm update {package.identifier}` to update it",
+                severity="warning",
+            )
+        elif package:
             self._run_packages([package], remove=False)
 
     def action_install_selected(self) -> None:
@@ -773,6 +791,8 @@ class GoinfrePMApp(App[None]):
             self.push_screen(ConfirmModal("Remove selected applications?", f"Remove {len(packages)} selected applications? User configuration will remain."), lambda ok: self._run_packages(packages, True) if ok else None)
 
     def _run_packages(self, packages: list[Package], remove: bool) -> None:
+        if not remove:
+            packages = [package for package in packages if not self.manager.installed(package.identifier)]
         if self.busy:
             self.notify("Another operation is active", severity="warning")
         elif not packages:

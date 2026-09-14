@@ -159,10 +159,10 @@ state are not removed.
 |---|---|
 | `↑`/`↓`, `j`/`k` | Navigate packages |
 | `→` / `←` | Move focus from categories to packages / back to categories |
-| `Space` | Select or deselect |
+| `Space` | Select or deselect (`☐` / `☑`; favorites show `★`) |
 | `/` | Search |
 | `Enter` | Refresh/view details |
-| `i` / `I` | Install highlighted / selected |
+| `i` / `I` | Install highlighted / review selected not-installed packages |
 | `r` / `R` | Confirm and remove highlighted / selected |
 | `a` | Select/deselect visible packages |
 | `p` | Choose and persist install root |
@@ -185,6 +185,16 @@ confirmations leave user configuration intact. Download operations show bytes,
 speed, and ETA when the server supplies a total; batch operations end with a
 success/failure summary. Unknown catalog sizes are labeled unknown rather than
 guessed.
+
+Installed applications cannot be accidentally installed again: `i` refuses an
+installed row, and the basket skips installed selections while keeping them
+selected for optional bulk removal with `R`. Use `gpm update <package>` when an
+intentional update or atomic reinstall is wanted.
+
+Automatic update comparison is available for GitHub-release packages. Direct,
+pinned vendor downloads are shown as **catalog-managed** because their upstream
+version cannot be compared reliably; a temporary GitHub/network failure is
+shown as **check unavailable** instead of the ambiguous “update unknown”.
 
 Starter Packs are curated shortcuts for **42 C/C++**, **Web Development**,
 **Minimal Terminal**, and **Creative** workflows. Press `t`, inspect a pack,
