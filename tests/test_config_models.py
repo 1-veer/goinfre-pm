@@ -41,6 +41,9 @@ def test_curated_catalog_includes_verified_developer_tools() -> None:
     expected = {"lazygit", "bat", "fd", "fzf", "shellcheck", "github-cli", "git-delta"}
     assert expected <= packages.keys()
     assert all(not packages[identifier].desktop for identifier in expected)
+    assert packages["kitty"].executable_candidates == ("bin/kitty",)
+    assert packages["kitty"].asset_pattern == r"^kitty-.*-x86_64\.txz$"
+    assert packages["postman"].executable_candidates[0] == "app/Postman"
 
 
 @pytest.mark.parametrize("identifier", ["../escape", "bad/name", "BadName", "a..b", "-leading", "trailing-"])

@@ -39,11 +39,11 @@ id = "tor-browser"
 name = "Tor Browser"
 description = "Privacy browser distributed by the Tor Project."
 category = "Browsers"
-url = "https://www.torproject.org/dist/torbrowser/15.0.19/tor-browser-linux-x86_64-15.0.19.tar.xz"
+url = "https://dist.torproject.org/torbrowser/15.0.22/tor-browser-linux-x86_64-15.0.22.tar.xz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["Browser/start-tor-browser", "Browser/firefox.real"]
-version = "15.0.19"
+version = "15.0.22"
 notes = "Pinned official distribution URL; update the catalog when Tor retires this release."
 
 [[package]]
@@ -361,6 +361,21 @@ url = "https://dl.pstmn.io/download/latest/linux_64"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["app/Postman", "Postman"]
+icons = ["app/resources/app/assets/icon.png", "app/resources/app/assets/icon_128x128.png"]
+notes = "Official rolling Linux x64 archive."
+
+[[package]]
+id = "kitty"
+name = "Kitty"
+description = "Fast, feature-rich GPU-based terminal emulator."
+category = "Developer Tools"
+url = "https://github.com/kovidgoyal/kitty"
+source_type = "github"
+asset_pattern = '^kitty-.*-x86_64\.txz$'
+architectures = ["x86_64"]
+executables = ["bin/kitty"]
+icons = ["share/icons/hicolor/256x256/apps/kitty.png"]
+notes = "Uses the official Linux x86_64 standalone archive."
 
 [[package]]
 id = "wezterm"
@@ -498,6 +513,7 @@ source_type = "github"
 asset_pattern = '_amd64\.deb$'
 architectures = ["x86_64"]
 executables = ["opt/Obsidian/obsidian"]
+notes = "If GitHub marks a mobile-only build as latest, GPM selects the newest recent stable release containing the official amd64 Debian asset."
 
 # Intentionally not migrated: the former Chromium snapshot endpoint returned an
 # opaque ZIP without stable metadata; Atom is end-of-life; the former Android

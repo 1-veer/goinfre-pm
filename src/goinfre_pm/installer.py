@@ -87,6 +87,7 @@ class PackageManager:
             backup = self.layout.apps / f".{identifier}.backup-{uuid.uuid4().hex}"
             live = self.layout.apps / identifier
             old_moved = False
+            promoted = False
             try:
                 yield ("log", f"Downloading {package.name}")
 
@@ -108,6 +109,7 @@ class PackageManager:
                     os.replace(live, backup)
                     old_moved = True
                 os.replace(staging, live)
+                promoted = True
                 executable = live / executable_relative
                 launchers = integrate(package, executable, live)
                 if backup.exists():
@@ -126,10 +128,21 @@ class PackageManager:
             except BaseException:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)
+                if promoted and live.exists():
+                    shutil.rmtree(live, ignore_errors=True)
                 if old_moved and backup.exists():
-                    if live.exists():
-                        shutil.rmtree(live, ignore_errors=True)
                     os.replace(backup, live)
+                    try:
+                        restored_executable = find_executable(live, package)
+                        if restored_executable is not None:
+                            integrate(package, restored_executable, live)
+                    except (OSError, RuntimeError):
+                        pass
+                elif promoted:
+                    try:
+                        remove_integration(package)
+                    except (OSError, RuntimeError):
+                        pass
                 raise
 
     def repair(self, identifier: str) -> list[str]:

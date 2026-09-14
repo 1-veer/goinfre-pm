@@ -59,3 +59,86 @@ def test_repair_corrects_wrapped_executable_and_state(monkeypatch, tmp_path: Pat
     assert repaired["executable"] == str(browser)
     assert (tmp_path / "bin" / "zen-browser").resolve() == browser.resolve()
     assert state.read()["desired"] == ["zen-browser"]
+
+
+def test_first_install_is_cleaned_up_when_integration_fails(monkeypatch, tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        executable_candidates=("bin/tool",),
+        desktop=False,
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    state = StateStore(tmp_path / "state.json")
+    manager = PackageManager(layout, [package], state)
+    archive = tmp_path / "tool.tar.xz"
+    archive.touch()
+
+    def fake_extract(_archive, destination, _source_type, _work) -> None:
+        executable = destination / "bin" / "tool"
+        executable.parent.mkdir(parents=True)
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+
+    monkeypatch.setattr("goinfre_pm.installer.verify_install_root", lambda _root: None)
+    monkeypatch.setattr("goinfre_pm.installer.available_space", lambda _root: 1024**3)
+    monkeypatch.setattr("goinfre_pm.installer.download", lambda *_args, **_kwargs: (archive, "test"))
+    monkeypatch.setattr("goinfre_pm.installer.extract_download", fake_extract)
+    monkeypatch.setattr("goinfre_pm.integration.USER_BIN", tmp_path / "bin")
+    monkeypatch.setattr("goinfre_pm.integration.DESKTOP_DIR", tmp_path / "applications")
+    monkeypatch.setattr("goinfre_pm.integration.ICON_DIR", tmp_path / "icons")
+
+    from goinfre_pm.installer import integrate as real_integrate
+
+    def failing_integrate(*args, **kwargs):
+        real_integrate(*args, **kwargs)
+        raise RuntimeError("home quota exhausted")
+
+    monkeypatch.setattr("goinfre_pm.installer.integrate", failing_integrate)
+
+    with pytest.raises(RuntimeError, match="quota"):
+        list(manager.install("tool"))
+
+    assert not (layout.apps / "tool").exists()
+    assert not (tmp_path / "bin" / "tool").exists()
+    assert state.read()["installed"] == {}
+
+
+def test_failed_download_does_not_remove_existing_install(monkeypatch, tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        executable_candidates=("bin/tool",),
+        desktop=False,
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    executable = layout.apps / "tool" / "bin" / "tool"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    user_bin = tmp_path / "bin"
+    user_bin.mkdir()
+    launcher = user_bin / "tool"
+    launcher.symlink_to(executable)
+    manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+
+    monkeypatch.setattr("goinfre_pm.installer.verify_install_root", lambda _root: None)
+    monkeypatch.setattr("goinfre_pm.installer.available_space", lambda _root: 1024**3)
+    monkeypatch.setattr("goinfre_pm.installer.download", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")))
+    monkeypatch.setattr("goinfre_pm.integration.USER_BIN", user_bin)
+
+    with pytest.raises(RuntimeError, match="offline"):
+        list(manager.install("tool"))
+
+    assert executable.is_file()
+    assert launcher.resolve() == executable.resolve()

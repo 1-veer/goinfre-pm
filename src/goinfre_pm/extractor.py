@@ -115,9 +115,10 @@ def safe_extract_tar(archive: Path, destination: Path) -> None:
 
 
 def extract_deb(archive: Path, destination: Path) -> None:
-    if shutil.which("dpkg") is None:
+    dpkg = shutil.which("dpkg")
+    if dpkg is None:
         raise RuntimeError("dpkg is required to extract .deb packages")
-    subprocess.run(["dpkg", "-x", str(archive), str(destination)], check=True, timeout=180)
+    subprocess.run([dpkg, "-x", str(archive), str(destination)], check=True, timeout=180)
 
 
 def extract_appimage(archive: Path, destination: Path, work: Path) -> None:
@@ -143,7 +144,7 @@ def extract_download(archive: Path, destination: Path, source_type: str, work: P
             target.chmod(0o755)
     elif source_type == "zip" or lower.endswith(".zip"):
         safe_extract_zip(archive, destination)
-    elif source_type == "tar" or lower.endswith((".tar.gz", ".tgz", ".tar.xz", ".tar.bz2", ".tar")):
+    elif source_type == "tar" or lower.endswith((".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar")):
         safe_extract_tar(archive, destination)
     else:
         destination.mkdir(parents=True, exist_ok=True)

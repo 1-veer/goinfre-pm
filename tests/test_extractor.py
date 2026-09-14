@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from goinfre_pm.extractor import UnsafeArchiveError, safe_extract_tar, safe_extract_zip
+from goinfre_pm.extractor import UnsafeArchiveError, extract_download, safe_extract_tar, safe_extract_zip
 
 
 def test_safe_zip_extraction_strips_single_root(tmp_path: Path) -> None:
@@ -52,6 +52,22 @@ def test_safe_tar_extraction(tmp_path: Path) -> None:
     executable = destination / "bin" / "run"
     assert executable.read_bytes() == payload
     assert os.access(executable, os.X_OK)
+
+
+def test_txz_is_dispatched_as_tar(tmp_path: Path) -> None:
+    archive = tmp_path / "tool.txz"
+    payload = b"#!/bin/sh\n"
+    with tarfile.open(archive, "w:xz") as handle:
+        info = tarfile.TarInfo("bin/tool")
+        info.size = len(payload)
+        info.mode = 0o755
+        handle.addfile(info, BytesIO(payload))
+        readme = tarfile.TarInfo("share/readme.txt")
+        readme.size = 0
+        handle.addfile(readme, BytesIO())
+    destination = tmp_path / "out"
+    extract_download(archive, destination, "auto", tmp_path)
+    assert (destination / "bin" / "tool").read_bytes() == payload
 
 
 def test_tar_traversal_is_rejected(tmp_path: Path) -> None:
