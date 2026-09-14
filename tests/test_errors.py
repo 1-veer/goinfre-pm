@@ -37,3 +37,23 @@ def test_cli_handles_keyboard_interrupt(monkeypatch, capsys) -> None:
 
     assert cli.main(["list"]) == 130
     assert "cancelled" in capsys.readouterr().err
+
+
+def test_cli_keeps_install_and_update_as_distinct_operations(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    class Manager:
+        def install(self, identifier, **_kwargs):
+            calls.append(("install", identifier))
+            return iter(())
+
+        def update(self, identifier, **_kwargs):
+            calls.append(("update", identifier))
+            return iter(())
+
+    manager = Manager()
+    monkeypatch.setattr(cli, "_manager", lambda: manager)
+
+    assert cli.main(["install", "tool"]) == 0
+    assert cli.main(["update", "tool"]) == 0
+    assert calls == [("install", "tool"), ("update", "tool")]

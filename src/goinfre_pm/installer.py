@@ -79,6 +79,30 @@ class PackageManager:
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
     ) -> Iterator[Event]:
         package = self.package(identifier)
+        if self.installed(identifier):
+            raise RuntimeError(f"{package.name} is already installed; use the update command instead")
+        yield from self._install(identifier, cancel, progress_callback, transfer_callback)
+
+    def update(
+        self,
+        identifier: str,
+        cancel: threading.Event | None = None,
+        progress_callback: Callable[[float], None] | None = None,
+        transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+    ) -> Iterator[Event]:
+        package = self.package(identifier)
+        if not self.installed(identifier):
+            raise RuntimeError(f"{package.name} is not installed; use the install command instead")
+        yield from self._install(identifier, cancel, progress_callback, transfer_callback)
+
+    def _install(
+        self,
+        identifier: str,
+        cancel: threading.Event | None = None,
+        progress_callback: Callable[[float], None] | None = None,
+        transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+    ) -> Iterator[Event]:
+        package = self.package(identifier)
         if not package.enabled:
             reason = package.notes or "this catalog entry is no longer supported"
             raise RuntimeError(f"{package.name} is unavailable: {reason}")

@@ -3,7 +3,7 @@ import asyncio
 from textual.widgets import Button, DataTable, Input, OptionList
 
 from goinfre_pm import app as app_module
-from goinfre_pm.models import Package
+from goinfre_pm.models import InstalledPackage, Package
 from goinfre_pm.storage import StateStore
 
 
@@ -94,6 +94,57 @@ def test_arrow_focus_and_space_preserve_package(monkeypatch, tmp_path) -> None:
             assert not isinstance(app.screen, app_module.ConfirmModal)
             assert app.query_one(DataTable)
             assert app.is_running
+
+    asyncio.run(scenario())
+
+
+def test_installed_packages_are_not_offered_to_install(monkeypatch, tmp_path) -> None:
+    packages = _packages()
+    root = tmp_path / "goinfre-pm"
+    installed_path = root / "apps" / packages[0].identifier
+    installed_path.mkdir(parents=True)
+    executable = installed_path / packages[0].identifier
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_installed(
+        InstalledPackage(
+            packages[0].identifier,
+            "1.0",
+            packages[0].url,
+            str(executable),
+            [],
+            "earlier",
+        ),
+        install_root=root,
+    )
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: root)
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp()
+        calls: list[tuple[list[Package], bool]] = []
+        app._run_packages = lambda selected, remove: calls.append((selected, remove))  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("right", "i")
+            assert calls == []
+
+            table = app.query_one(DataTable)
+            installed_marker = str(table.get_row(packages[0].identifier)[0])
+            available_marker = str(table.get_row(packages[1].identifier)[0])
+            assert "○" not in installed_marker + available_marker
+            assert "●" not in installed_marker + available_marker
+            assert "☐" in available_marker
+
+            packages[0].selected = True
+            packages[1].selected = True
+            app.action_basket()
+            assert isinstance(app.screen, app_module.BasketModal)
+            assert app.screen.packages == [packages[1]]
+            await pilot.press("escape")
 
     asyncio.run(scenario())
 
