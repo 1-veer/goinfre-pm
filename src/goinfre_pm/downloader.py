@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 import json
+import hashlib
 import re
 import ssl
 import threading
@@ -27,7 +28,8 @@ def _request(url: str, timeout: int = 30) -> urllib.response.addinfourl:
         raise RuntimeError("Only remote HTTPS downloads are allowed")
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream, application/json"})
     try:
-        response = urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context())
+        # The scheme is checked immediately above and again after redirects.
+        response = urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context())  # nosec B310
         final = urllib.parse.urlparse(response.geturl())
         if final.scheme != "https" or not final.netloc:
             unsafe_url = response.geturl()
@@ -159,5 +161,20 @@ def download(
     if total is not None and written != total:
         output.unlink(missing_ok=True)
         raise RuntimeError(f"Incomplete download: expected {total} bytes, received {written}")
+    if package.sha256:
+        try:
+            digest = hashlib.sha256()
+            with output.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            actual = digest.hexdigest()
+            if actual.lower() != package.sha256.lower():
+                raise RuntimeError(
+                    f"Checksum mismatch for {filename}: expected {package.sha256.lower()}, received {actual}"
+                )
+        except BaseException:
+            output.unlink(missing_ok=True)
+            raise
+        log(f"Verified SHA-256 for {filename}")
     log(f"Downloaded {filename} ({written / (1024 * 1024):.1f} MiB)")
     return output, version

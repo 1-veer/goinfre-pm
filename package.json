@@ -1,6 +1,6 @@
 {
   "name": "goinfre-pm",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
   "license": "MIT",
   "author": "Ayoub Bougatia",
@@ -25,6 +25,7 @@
     "packages.toml",
     "pyproject.toml",
     "requirements.txt",
+    "docs/tui-screenshot-placeholder.svg",
     "README.md",
     "LICENSE",
     "NOTICE.md"

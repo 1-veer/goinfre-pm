@@ -43,6 +43,15 @@ def _boolean(data: dict[str, Any], key: str, default: bool) -> bool:
     return value
 
 
+def _optional_size(data: dict[str, Any], key: str) -> int | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ConfigurationError(f"{key} must be a non-negative integer number of bytes")
+    return value
+
+
 def load_packages(path: Path | None = None) -> list[Package]:
     path = default_packages_file() if path is None else path
     legacy = path if path.suffix == ".conf" else path.with_suffix(".conf")
@@ -91,6 +100,9 @@ def load_packages(path: Path | None = None) -> list[Package]:
                 asset_pattern=str(entry.get("asset_pattern", "")),
                 notes=str(entry.get("notes", "")),
                 enabled=_boolean(entry, "enabled", True),
+                download_size=_optional_size(entry, "download_size"),
+                installed_size=_optional_size(entry, "installed_size"),
+                sha256=str(entry.get("sha256", "")),
                 post_install=tuple(PostInstallAction.from_dict(item) for item in actions_raw),
             )
         except (KeyError, TypeError, ValueError) as exc:

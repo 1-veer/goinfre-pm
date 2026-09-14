@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import uuid
 
 from .downloader import download
@@ -16,6 +17,18 @@ from .models import InstalledPackage, Package
 from .storage import Layout, StateStore, available_space, verify_install_root
 
 Event = tuple[str, object]
+
+
+def directory_size(root: Path) -> int:
+    """Return regular-file bytes without following links outside an install."""
+    total = 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_file() and not path.is_symlink():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 class PackageManager:
@@ -63,6 +76,7 @@ class PackageManager:
         identifier: str,
         cancel: threading.Event | None = None,
         progress_callback: Callable[[float], None] | None = None,
+        transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
     ) -> Iterator[Event]:
         package = self.package(identifier)
         if not package.enabled:
@@ -72,8 +86,15 @@ class PackageManager:
             raise RuntimeError(f"{package.name} does not support this machine architecture")
         verify_install_root(self.layout.root)
         self.layout.create()
-        if available_space(self.layout.root) < 100 * 1024 * 1024:
-            raise RuntimeError("Less than 100 MiB is available in the selected goinfre root")
+        free_space = available_space(self.layout.root)
+        minimum = 100 * 1024 * 1024
+        known_peak = (package.download_size or 0) + (package.installed_size or 0)
+        required = max(minimum, known_peak)
+        if free_space < required:
+            raise RuntimeError(
+                f"Not enough goinfre space for {package.name}: "
+                f"{required / 1024**2:.1f} MiB known peak required, {free_space / 1024**2:.1f} MiB available"
+            )
         log_file = self.layout.logs / f"{identifier}.log"
 
         def log(message: str) -> None:
@@ -88,13 +109,24 @@ class PackageManager:
             live = self.layout.apps / identifier
             old_moved = False
             promoted = False
+            download_started = time.monotonic()
+            last_transfer_emit = 0.0
             try:
                 yield ("log", f"Downloading {package.name}")
 
                 def on_progress(done: int, total: int | None) -> None:
-                    log(f"download {done}/{total or '?'} bytes")
-                    if total and progress_callback:
-                        progress_callback(min(40.0, done / total * 40.0))
+                    nonlocal last_transfer_emit
+                    elapsed = max(time.monotonic() - download_started, 0.001)
+                    speed = done / elapsed
+                    eta = (total - done) / speed if total is not None and speed > 0 else None
+                    now = time.monotonic()
+                    if now - last_transfer_emit >= 0.2 or (total is not None and done == total):
+                        log(f"download {done}/{total or '?'} bytes")
+                        if transfer_callback:
+                            transfer_callback(done, total, speed, eta)
+                        if total and progress_callback:
+                            progress_callback(min(40.0, done / total * 40.0))
+                        last_transfer_emit = now
 
                 archive, version = download(package, operation, on_progress, log, cancel)
                 yield ("progress", 45)
@@ -112,6 +144,7 @@ class PackageManager:
                 promoted = True
                 executable = live / executable_relative
                 launchers = integrate(package, executable, live)
+                installed_size = directory_size(live)
                 if backup.exists():
                     shutil.rmtree(backup)
                 record = InstalledPackage(
@@ -121,6 +154,8 @@ class PackageManager:
                     executable=str(executable),
                     launchers=launchers,
                     installed_at=datetime.now(timezone.utc).isoformat(),
+                    download_size=archive.stat().st_size,
+                    installed_size=installed_size,
                 )
                 self.state.set_installed(record, install_root=self.layout.root)
                 yield ("progress", 100)
@@ -163,6 +198,8 @@ class PackageManager:
             executable=str(executable),
             launchers=launchers,
             installed_at=str(existing.get("installed_at", "")),
+            download_size=existing.get("download_size") if isinstance(existing.get("download_size"), int) else None,
+            installed_size=directory_size(live),
         )
         self.state.set_installed(record, desired=identifier in state.get("desired", []), install_root=self.layout.root)
         return launchers

@@ -46,6 +46,25 @@ def test_curated_catalog_includes_verified_developer_tools() -> None:
     assert packages["postman"].executable_candidates[0] == "app/Postman"
 
 
+def test_spotify_catalog_entry_is_pinned_to_verified_vendor_build() -> None:
+    catalog = Path(__file__).parents[1] / "packages.toml"
+    spotify = {package.identifier: package for package in load_packages(catalog)}["spotify"]
+
+    assert spotify.category == "Media"
+    assert spotify.url == "https://download.spotify.com/spotify-client_1.2.74.477_amd64.deb"
+    assert spotify.source_type == "deb"
+    assert spotify.architectures == ("x86_64",)
+    assert spotify.version == "1.2.74.477.g3be53afe"
+    assert spotify.sha256 == "cbb36807c602bb38c53312b9ed790d7cb4039a59a98953494dba0d89a8144399"
+    assert "usr/bin/spotify" in spotify.executable_candidates
+    assert spotify.config_paths == ("~/.config/spotify",)
+
+
+def test_invalid_checksum_is_rejected() -> None:
+    with pytest.raises(ValueError, match="sha256"):
+        Package("tool", "Tool", "fixture", "Tools", "https://example.invalid/tool", sha256="unsafe")
+
+
 @pytest.mark.parametrize("identifier", ["../escape", "bad/name", "BadName", "a..b", "-leading", "trailing-"])
 def test_invalid_package_identifiers_are_rejected(identifier: str) -> None:
     with pytest.raises(ValueError):

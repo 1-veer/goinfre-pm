@@ -9,9 +9,10 @@ $gpm-green: #56c596;
 $gpm-red: #ef6b73;
 $gpm-amber: #e6b450;
 
-Screen { background: $gpm-background; color: $gpm-text; }
+Screen { background: $gpm-background; color: $gpm-text; layers: base overlay; }
 #header { dock: top; height: 3; background: $gpm-panel-raised; border-bottom: solid $gpm-violet; padding: 0 1; }
 #brand { width: 22; color: $gpm-lavender; text-style: bold; content-align: left middle; }
+#basket-status { width: 34; color: $gpm-lavender; content-align: center middle; }
 #storage { width: 1fr; color: $gpm-muted; content-align: right middle; }
 #body { height: 1fr; }
 .panel { background: $gpm-panel; border: round #49325e; border-title-color: $gpm-muted; }
@@ -39,3 +40,25 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .modal-title { color: $gpm-lavender; text-style: bold; height: 2; }
 .modal-buttons { height: 3; align: center middle; }
 .modal-buttons Button { margin: 0 1; }
+.modal-copy { color: $gpm-muted; height: auto; margin-bottom: 1; }
+.welcome-modal { width: 72; }
+.packs-modal { width: 72; height: 90%; max-height: 25; }
+.packs-modal OptionList { height: 6; background: $gpm-panel; border: round #49325e; }
+.packs-modal #pack-details { height: 1fr; min-height: 5; color: $gpm-muted; padding: 1; }
+.basket-modal { width: 72; max-height: 90%; overflow-y: auto; }
+.sort-modal { width: 44; height: 16; }
+.sort-modal OptionList { height: 1fr; background: $gpm-panel; border: round #49325e; }
+.summary-modal { width: 72; max-height: 90%; overflow-y: auto; }
+.doctor-modal { width: 78; height: 90%; max-height: 28; }
+.doctor-modal DataTable { height: 1fr; background: $gpm-panel; }
+#doctor-action { height: 3; color: $gpm-amber; padding: 1; }
+#splash {
+    layer: overlay;
+    width: 100%;
+    height: 100%;
+    background: $gpm-background;
+    color: $gpm-lavender;
+    text-style: bold;
+    text-align: center;
+    content-align: center middle;
+}

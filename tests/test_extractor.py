@@ -6,6 +6,7 @@ import zipfile
 
 import pytest
 
+from goinfre_pm import extractor
 from goinfre_pm.extractor import UnsafeArchiveError, extract_download, safe_extract_tar, safe_extract_zip
 
 
@@ -70,6 +71,19 @@ def test_txz_is_dispatched_as_tar(tmp_path: Path) -> None:
     assert (destination / "bin" / "tool").read_bytes() == payload
 
 
+def test_deb_uses_ubuntu_dpkg_deb_extractor(monkeypatch, tmp_path: Path) -> None:
+    archive = tmp_path / "tool.deb"
+    destination = tmp_path / "out"
+    archive.touch()
+    calls = []
+    monkeypatch.setattr(extractor.shutil, "which", lambda command: "/usr/bin/dpkg-deb" if command == "dpkg-deb" else None)
+    monkeypatch.setattr(extractor.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
+
+    extractor.extract_deb(archive, destination)
+
+    assert calls == [(["/usr/bin/dpkg-deb", "-x", str(archive), str(destination)], {"check": True, "timeout": 180})]
+
+
 def test_tar_traversal_is_rejected(tmp_path: Path) -> None:
     archive = tmp_path / "bad.tar"
     with tarfile.open(archive, "w") as handle:
@@ -89,3 +103,41 @@ def test_tar_unsafe_symlink_is_rejected(tmp_path: Path) -> None:
         handle.addfile(info)
     with pytest.raises(UnsafeArchiveError):
         safe_extract_tar(archive, tmp_path / "out")
+
+
+def test_tar_internal_relative_symlink_is_preserved(tmp_path: Path) -> None:
+    archive = tmp_path / "safe-link.tar"
+    payload = b"library"
+    with tarfile.open(archive, "w") as handle:
+        file_info = tarfile.TarInfo("tool/lib/library.so")
+        file_info.size = len(payload)
+        handle.addfile(file_info, BytesIO(payload))
+        link_info = tarfile.TarInfo("tool/bin/library.so")
+        link_info.type = tarfile.SYMTYPE
+        link_info.linkname = "../lib/library.so"
+        handle.addfile(link_info)
+
+    destination = tmp_path / "out"
+    safe_extract_tar(archive, destination)
+
+    assert (destination / "bin" / "library.so").is_symlink()
+    assert (destination / "bin" / "library.so").read_bytes() == payload
+
+
+def test_tar_internal_hard_link_uses_archive_root(tmp_path: Path) -> None:
+    archive = tmp_path / "safe-hard-link.tar"
+    payload = b"binary"
+    with tarfile.open(archive, "w") as handle:
+        file_info = tarfile.TarInfo("tool/bin/real")
+        file_info.size = len(payload)
+        handle.addfile(file_info, BytesIO(payload))
+        link_info = tarfile.TarInfo("tool/bin/alias")
+        link_info.type = tarfile.LNKTYPE
+        link_info.linkname = "tool/bin/real"
+        handle.addfile(link_info)
+
+    destination = tmp_path / "out"
+    safe_extract_tar(archive, destination)
+
+    assert (destination / "bin" / "alias").read_bytes() == payload
+    assert os.stat(destination / "bin" / "alias").st_ino == os.stat(destination / "bin" / "real").st_ino

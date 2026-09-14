@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import os
-import platform
 import shutil
 import sys
 
 from .branding import COMMAND, DISPLAY_NAME, SLUG, VERSION
 from .config import ConfigurationError, load_packages
+from .doctor import collect_doctor_checks
 from .errors import error_text, write_crash_log
-from .integration import AUTOSTART_DIR, DESKTOP_DIR, USER_BIN
+from .integration import AUTOSTART_DIR, USER_BIN
 from .installer import PackageManager
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root, verify_install_root
 
@@ -72,47 +71,13 @@ def set_autostart(enabled: bool) -> None:
 
 
 def doctor() -> int:
-    failures = 0
-
-    def check(ok: bool, message: str, detail: str = "") -> None:
-        nonlocal failures
-        print(f"[{'OK' if ok else 'FAIL'}] {message}{': ' + detail if detail else ''}")
-        failures += 0 if ok else 1
-
-    root = resolve_install_root()
-    check(root is not None, "goinfre path", str(root) if root else "not configured")
-    if root:
-        check(is_writable_directory(root), "root is writable")
-        check(available_space(root) >= 100 * 1024 * 1024, "available space", _human_size(available_space(root)))
-    check(sys.version_info >= (3, 10), "Python 3.10+", platform.python_version())
-    for command in ("dpkg",):
-        check(shutil.which(command) is not None, f"external command `{command}`")
-    path_entries = os.environ.get("PATH", "").split(os.pathsep)
-    check(str(USER_BIN) in path_entries, f"{USER_BIN} is in PATH")
-    try:
-        packages = load_packages()
-        check(True, "package configuration", f"{len(packages)} packages")
-        incompatible = [package.identifier for package in packages if not package.compatible]
-        check(not incompatible, "architecture compatibility", ", ".join(incompatible) if incompatible else "all compatible")
-    except ConfigurationError as exc:
-        check(False, "package configuration", str(exc))
-        packages = []
-    state = StateStore().read()
-    installed = state.get("installed", {})
-    broken = [item for item, record in installed.items() if not Path(str(record.get("executable", ""))).is_file()]
-    check(not broken, "recorded executables", ", ".join(broken) if broken else "intact")
-    missing_launchers: list[str] = []
-    broken_symlinks: list[str] = []
-    for item, record in installed.items():
-        for launcher in record.get("launchers", []):
-            path = Path(str(launcher))
-            if path.is_symlink() and not path.exists():
-                broken_symlinks.append(item)
-            if path.suffix == ".desktop" and not path.exists():
-                missing_launchers.append(item)
-    check(not broken_symlinks, "broken command symlinks", ", ".join(sorted(set(broken_symlinks))) if broken_symlinks else "none")
-    check(not missing_launchers, "desktop launchers", ", ".join(sorted(set(missing_launchers))) if missing_launchers else "intact")
-    return 0 if failures == 0 else 1
+    checks = collect_doctor_checks()
+    for check in checks:
+        label = {"ok": "OK", "warning": "WARN", "error": "FAIL"}[check.status]
+        print(f"[{label}] {check.name}: {check.detail}")
+        if check.action:
+            print(f"       {check.action}")
+    return 1 if any(check.status == "error" for check in checks) else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,7 +153,17 @@ def main(argv: list[str] | None = None) -> int:
                     if sys.stdout.isatty():
                         print(f"Progress: {value:.0f}%", end="\r")
 
-                _emit(manager.install(identifier, progress_callback=cli_progress))
+                def cli_transfer(done: int, total: int | None, speed: float, eta: float | None) -> None:
+                    if not sys.stdout.isatty():
+                        return
+                    total_text = _human_size(total) if total is not None else "unknown"
+                    eta_text = f", ETA {max(0, round(eta))}s" if eta is not None else ""
+                    print(
+                        f"Download: {_human_size(done)}/{total_text}, {_human_size(int(speed))}/s{eta_text}",
+                        end="\r",
+                    )
+
+                _emit(manager.install(identifier, progress_callback=cli_progress, transfer_callback=cli_transfer))
         elif args.command == "remove":
             manager = _manager()
             for identifier in args.packages:
