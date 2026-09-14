@@ -127,8 +127,9 @@ def integrate(package: Package, executable: Path, package_dir: Path | None = Non
         launcher.write_text(desktop_entry(package, executable, icon_target), encoding="utf-8")
         launcher.chmod(0o755)
         created.append(str(launcher))
-        if shutil.which("update-desktop-database"):
-            subprocess.run(["update-desktop-database", str(DESKTOP_DIR)], timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        desktop_database = shutil.which("update-desktop-database")
+        if desktop_database:
+            subprocess.run([desktop_database, str(DESKTOP_DIR)], timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return created
 
 

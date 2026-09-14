@@ -223,8 +223,9 @@ python3 -c 'import json,os,sys,tempfile; target=sys.argv[1]; fd,tmp=tempfile.mks
 LAUNCHER=$HOME/.local/bin/$PROJECT_COMMAND
 {
     printf '%s\n' '#!/bin/sh'
-    printf '%s\n' "export GPM_PACKAGES_FILE='$MANAGER_RUNTIME/packages.toml'"
-    printf '%s\n' "exec '$MANAGER_VENV/bin/python' -m $PROJECT_MODULE \"\$@\""
+    printf '%s\n' "manager_home=\$HOME/.local/share/$PROJECT_SLUG"
+    printf '%s\n' 'export GPM_PACKAGES_FILE=$manager_home/runtime/packages.toml'
+    printf '%s\n' "exec \"\$manager_home/venv/bin/python\" -m $PROJECT_MODULE \"\$@\""
 } > "$LAUNCHER"
 chmod 755 "$LAUNCHER"
 "$LAUNCHER" version >/dev/null 2>&1 || die "The new local launcher failed its startup check."

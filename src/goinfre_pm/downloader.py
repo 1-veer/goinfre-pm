@@ -73,6 +73,19 @@ def _asset_score(name: str, pattern: str) -> int:
     return score
 
 
+def _compatible_asset(release: dict[str, object], package: Package) -> dict[str, object] | None:
+    assets = release.get("assets", [])
+    if not isinstance(assets, list):
+        return None
+    scored = [
+        (_asset_score(str(asset.get("name", "")), package.asset_pattern), asset)
+        for asset in assets
+        if isinstance(asset, dict)
+    ]
+    usable = [item for item in scored if item[0] >= 0]
+    return max(usable, key=lambda item: item[0])[1] if usable else None
+
+
 def resolve_github_release(package: Package, log: Log) -> tuple[str, str]:
     match = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)/?", package.url)
     if not match:
@@ -82,11 +95,28 @@ def resolve_github_release(package: Package, log: Log) -> tuple[str, str]:
     log(f"Resolving latest release from {owner}/{repo}")
     with _request(api, timeout=20) as response:
         data = json.loads(response.read().decode("utf-8"))
-    scored = [(_asset_score(str(asset.get("name", "")), package.asset_pattern), asset) for asset in data.get("assets", [])]
-    usable = [item for item in scored if item[0] >= 0]
-    if not usable:
+    if not isinstance(data, dict):
+        raise RuntimeError("GitHub returned invalid latest-release metadata")
+    chosen = _compatible_asset(data, package)
+    if chosen is None:
+        # Some upstreams mark a mobile-only release as "latest" even though a
+        # recent stable desktop release is still current (Obsidian does this).
+        # Look backwards without ever accepting drafts or prereleases.
+        log("Latest release has no compatible asset; checking recent stable releases")
+        releases_api = f"https://api.github.com/repos/{owner}/{repo}/releases?per_page=30"
+        with _request(releases_api, timeout=20) as response:
+            releases = json.loads(response.read().decode("utf-8"))
+        if not isinstance(releases, list):
+            raise RuntimeError("GitHub returned invalid release metadata")
+        for release in releases:
+            if not isinstance(release, dict) or release.get("draft") or release.get("prerelease"):
+                continue
+            candidate = _compatible_asset(release, package)
+            if candidate is not None:
+                data, chosen = release, candidate
+                break
+    if chosen is None:
         raise RuntimeError(f"No compatible release asset found for {package.identifier}/{current_architecture()}")
-    _, chosen = max(usable, key=lambda item: item[0])
     url = str(chosen.get("browser_download_url", ""))
     if not url.startswith("https://"):
         raise RuntimeError("GitHub returned an unsafe asset URL")
