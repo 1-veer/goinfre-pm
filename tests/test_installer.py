@@ -24,6 +24,28 @@ def test_disabled_package_cannot_be_installed(tmp_path: Path) -> None:
         next(manager.install("retired"))
 
 
+def test_known_peak_size_is_checked_before_download(monkeypatch, tmp_path: Path) -> None:
+    package = Package(
+        identifier="large-tool",
+        name="Large Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/large.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        download_size=80 * 1024**2,
+        installed_size=150 * 1024**2,
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    layout.create()
+    manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+    monkeypatch.setattr("goinfre_pm.installer.verify_install_root", lambda _root: None)
+    monkeypatch.setattr("goinfre_pm.installer.available_space", lambda _root: 200 * 1024**2)
+
+    with pytest.raises(RuntimeError, match="230.0 MiB known peak required"):
+        next(manager.install("large-tool"))
+
+
 def test_repair_corrects_wrapped_executable_and_state(monkeypatch, tmp_path: Path) -> None:
     package = Package(
         identifier="zen-browser",

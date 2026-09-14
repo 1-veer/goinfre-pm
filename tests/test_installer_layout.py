@@ -18,5 +18,5 @@ def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
     assert "PYTHONPATH=$PIP_BOOTSTRAP_WHEEL" in installer
     assert '"$MANAGER_VENV/bin/python" -m pip --version' in installer
     assert "require_command curl" not in installer
-    assert "require_command dpkg" not in installer
+    assert "require_command dpkg-deb" not in installer
     assert "sudo apt" not in installer

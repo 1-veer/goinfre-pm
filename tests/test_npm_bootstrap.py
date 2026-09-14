@@ -23,6 +23,7 @@ def test_npm_package_contains_complete_local_installer() -> None:
         "packages.toml",
         "pyproject.toml",
         "requirements.txt",
+        "docs/tui-screenshot-placeholder.svg",
     ):
         assert required in metadata["files"]
 
@@ -46,4 +47,4 @@ def test_npm_bootstrap_uses_argument_arrays_and_never_invokes_sudo() -> None:
     assert 'run("sh", [installer, "uninstall"]' in bootstrap
     assert "sudo apt" not in bootstrap
     assert 'works("curl"' not in bootstrap
-    assert 'works("dpkg"' not in bootstrap
+    assert 'works("dpkg-deb"' not in bootstrap

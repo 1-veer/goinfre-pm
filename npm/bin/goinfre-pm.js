@@ -54,8 +54,8 @@ function printRequirements() {
     "No sudo, system pip, python3-venv, or curl is required. The installer creates",
     "a private environment and bootstraps a pinned, SHA-256-verified pip wheel.",
     "",
-    "dpkg is optional and only needed when installing a package distributed as .deb.",
-    "If Python or dpkg is missing, ask 1337/42 staff to restore the standard Ubuntu",
+    "dpkg-deb is optional and only needed when installing a package distributed as .deb.",
+    "If Python or dpkg-deb is missing, ask 1337/42 staff to restore the standard Ubuntu",
     "workstation tools; this bootstrap never runs sudo or apt.",
     "",
   ].join("\n"));

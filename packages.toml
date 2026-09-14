@@ -363,6 +363,8 @@ architectures = ["x86_64"]
 executables = ["app/Postman", "Postman"]
 icons = ["app/resources/app/assets/icon.png", "app/resources/app/assets/icon_128x128.png"]
 notes = "Official rolling Linux x64 archive."
+download_size = 202773280
+installed_size = 548280320
 
 [[package]]
 id = "kitty"
@@ -376,6 +378,8 @@ architectures = ["x86_64"]
 executables = ["bin/kitty"]
 icons = ["share/icons/hicolor/256x256/apps/kitty.png"]
 notes = "Uses the official Linux x86_64 standalone archive."
+download_size = 32024932
+installed_size = 115998720
 
 [[package]]
 id = "wezterm"
@@ -463,6 +467,24 @@ source_type = "github"
 asset_pattern = 'x86_64\.AppImage$'
 architectures = ["x86_64"]
 executables = ["AppRun", "qbittorrent"]
+
+[[package]]
+id = "spotify"
+name = "Spotify"
+description = "Spotify desktop music client, pinned to the last vendor build compatible with Ubuntu 22.04."
+category = "Media"
+url = "https://download.spotify.com/spotify-client_1.2.74.477_amd64.deb"
+source_type = "deb"
+architectures = ["x86_64"]
+executables = ["usr/bin/spotify", "usr/share/spotify/spotify"]
+icons = ["usr/share/spotify/icons/spotify-linux-512.png", "usr/share/icons/hicolor/512x512/apps/spotify-client.png"]
+version = "1.2.74.477.g3be53afe"
+download_size = 154653044
+installed_size = 360806400
+sha256 = "cbb36807c602bb38c53312b9ed790d7cb4039a59a98953494dba0d89a8144399"
+config_paths = ["~/.config/spotify"]
+remove_user_config = true
+notes = "Official Spotify-hosted amd64 build. Its package declares libc6 >= 2.30 and the executable's newest GLIBC symbol is 2.30, so it is compatible with Ubuntu 22.04/glibc 2.35. GPM preserves ~/.config/spotify unless the user explicitly requests config removal."
 
 [[package]]
 id = "stremio"

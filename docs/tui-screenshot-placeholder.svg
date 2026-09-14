@@ -2,13 +2,26 @@
   <rect width="960" height="540" rx="16" fill="#0d0914"/>
   <rect x="18" y="18" width="924" height="54" rx="8" fill="#21172d" stroke="#a855f7"/>
   <text x="40" y="52" fill="#c4b5fd" font-family="monospace" font-size="22" font-weight="bold">GoinfrePM</text>
-  <text x="920" y="52" fill="#9b93a6" text-anchor="end" font-family="monospace" font-size="15">TUI screenshot placeholder</text>
+  <text x="920" y="52" fill="#9b93a6" text-anchor="end" font-family="monospace" font-size="15">4 selected • 820 MiB • 18.6 GiB free</text>
   <rect x="18" y="88" width="180" height="320" rx="8" fill="#171120" stroke="#49325e"/>
   <rect x="214" y="88" width="430" height="320" rx="8" fill="#171120" stroke="#49325e"/>
   <rect x="660" y="88" width="282" height="320" rx="8" fill="#171120" stroke="#49325e"/>
   <rect x="18" y="424" width="924" height="96" rx="8" fill="#21172d" stroke="#49325e"/>
-  <rect x="226" y="136" width="406" height="32" rx="5" fill="#5b2182"/>
+  <rect x="226" y="148" width="406" height="32" rx="5" fill="#5b2182"/>
   <g fill="#9b93a6" font-family="monospace" font-size="15">
-    <text x="36" y="122">Categories</text><text x="36" y="158" fill="#f5f3f7">All</text><text x="36" y="190">Browsers</text><text x="36" y="222">Editors and IDEs</text><text x="36" y="254">Developer Tools</text><text x="228" y="122">Package catalog</text><text x="676" y="122">Details</text><text x="36" y="452">Ready · logs and progress</text>
+    <text x="36" y="118">CATEGORIES • ACTIVE</text>
+    <text x="36" y="152" fill="#f5f3f7">All</text><text x="36" y="180">Favorites</text>
+    <text x="36" y="208">Browsers</text><text x="36" y="236">Editors &amp; IDEs</text>
+    <text x="36" y="264">Developer Tools</text><text x="36" y="292">Communication</text>
+    <text x="36" y="320">Media</text><text x="36" y="348">Installed</text>
+    <text x="228" y="118">PACKAGES</text><text x="228" y="144">   Name          Category       Status</text>
+    <text x="228" y="170" fill="#f5f3f7">★● Kitty         Developer      Available</text>
+    <text x="228" y="202">·● VSCodium      Editors        Installed</text>
+    <text x="228" y="234">·○ Zen Browser   Browsers       Update available</text>
+    <text x="676" y="118">DETAILS</text><text x="676" y="154" fill="#c4b5fd">Kitty</text>
+    <text x="676" y="184">Fast GPU terminal</text><text x="676" y="220">Source: github</text>
+    <text x="676" y="248">Size: 110.6 MiB</text><text x="676" y="276" fill="#56c596">Status: installed</text>
+    <text x="36" y="452">Ready · downloads show amount, speed, and ETA</text>
+    <text x="36" y="492" fill="#c4b5fd">t Packs   b Basket   f Favorite   s Sort   d Doctor   ? Help</text>
   </g>
 </svg>

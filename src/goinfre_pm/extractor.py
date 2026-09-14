@@ -4,7 +4,8 @@ from pathlib import Path, PurePosixPath
 import os
 import shutil
 import stat
-import subprocess
+# Subprocesses below always use explicit argument arrays and never a shell.
+import subprocess  # nosec B404
 import tarfile
 import zipfile
 
@@ -101,29 +102,42 @@ def safe_extract_tar(archive: Path, destination: Path) -> None:
         for member, target in deferred_links:
             target.parent.mkdir(parents=True, exist_ok=True)
             link = PurePosixPath(member.linkname.replace("\\", "/"))
-            if link.is_absolute() or ".." in link.parts:
+            if link.is_absolute():
                 raise UnsafeArchiveError(f"Unsafe archive link: {member.name!r} -> {member.linkname!r}")
-            link_target = (target.parent / Path(*link.parts)).resolve(strict=False)
-            if not _inside(destination, link_target):
-                raise UnsafeArchiveError(f"Archive link escapes destination: {member.name!r}")
             if member.issym():
+                link_target = (target.parent / Path(*link.parts)).resolve(strict=False)
+                if not _inside(destination, link_target):
+                    raise UnsafeArchiveError(f"Archive link escapes destination: {member.name!r}")
                 target.symlink_to(member.linkname)
             else:
+                # Tar hard-link names are archive-root relative, unlike
+                # symlink targets, which are relative to the link's parent.
+                linked_relative = _safe_relative(member.linkname, strip)
+                if linked_relative is None:
+                    raise UnsafeArchiveError(f"Invalid hard link target: {member.linkname!r}")
+                link_target = (destination / linked_relative).resolve(strict=False)
+                if not _inside(destination, link_target):
+                    raise UnsafeArchiveError(f"Archive link escapes destination: {member.name!r}")
                 if not link_target.is_file():
                     raise UnsafeArchiveError(f"Invalid hard link target: {member.linkname!r}")
                 os.link(link_target, target)
 
 
 def extract_deb(archive: Path, destination: Path) -> None:
-    dpkg = shutil.which("dpkg")
-    if dpkg is None:
-        raise RuntimeError("dpkg is required to extract .deb packages")
-    subprocess.run([dpkg, "-x", str(archive), str(destination)], check=True, timeout=180)
+    dpkg_deb = shutil.which("dpkg-deb")
+    if dpkg_deb is None:
+        raise RuntimeError("dpkg-deb is required to extract .deb packages")
+    # The executable comes from PATH and every dynamic value is one array item.
+    subprocess.run([dpkg_deb, "-x", str(archive), str(destination)], check=True, timeout=180)
 
 
 def extract_appimage(archive: Path, destination: Path, work: Path) -> None:
     archive.chmod(archive.stat().st_mode | 0o111)
-    subprocess.run([str(archive), "--appimage-extract"], cwd=work, check=True, timeout=180, stdout=subprocess.DEVNULL)
+    # Executing the AppImage runtime is the format's extraction interface; no
+    # shell is involved and the operation remains inside unique staging.
+    subprocess.run(
+        [str(archive), "--appimage-extract"], cwd=work, check=True, timeout=180, stdout=subprocess.DEVNULL
+    )
     root = work / "squashfs-root"
     if not root.is_dir():
         raise RuntimeError("AppImage did not produce squashfs-root")

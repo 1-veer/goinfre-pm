@@ -6,6 +6,11 @@ keeps the package-manager runtime, small state, launchers, icons, and command
 links in the home directory. It does not install system packages or require
 administrator access.
 
+Version 1.4 adds a one-time welcome, Starter Packs, an installation basket with
+honest storage estimates, persistent favorites, sorting, cached update badges,
+and the same Doctor checks in both the TUI and `gpm doctor`. Starter Packs only
+select applications: the user always reviews the basket before installation.
+
 > Project identity is centralized in `src/goinfre_pm/project.conf`, while npm's
 > required publishing metadata lives in `package.json`.
 
@@ -90,7 +95,8 @@ The supported target is Ubuntu 22.04 on x86_64. The workstation needs Node.js
 and npm to provide `npx`, plus the standard Ubuntu Python 3.10 or newer. No
 sudo, system pip, `python3-venv`, or curl is required. The installer creates its
 private environment with `--without-pip`, then bootstraps a pinned pip wheel
-from official PyPI and verifies its SHA-256 before using it.
+from official PyPI and verifies its SHA-256 before using it. Runtime and build
+dependencies are exact-version pinned for reproducible student installs.
 
 Verify the result with:
 
@@ -99,10 +105,10 @@ node --version
 npm --version
 npx --version
 python3 --version
-dpkg --version
+dpkg-deb --version
 ```
 
-`dpkg` is optional and only needed for applications distributed as `.deb`.
+`dpkg-deb` is optional and only needed for applications distributed as `.deb`.
 GoinfrePM and its npm bootstrap never invoke `sudo` or `apt`. If Node, Python,
 or `dpkg` is missing from a managed workstation, ask school staff to restore
 that standard Ubuntu tool. Network access to npm and PyPI is required on the
@@ -160,7 +166,13 @@ state are not removed.
 | `r` / `R` | Confirm and remove highlighted / selected |
 | `a` | Select/deselect visible packages |
 | `p` | Choose and persist install root |
+| `t` | Open Starter Packs |
+| `b` | Review the current basket and storage estimate |
+| `f` | Add/remove the highlighted package from persistent favorites |
+| `s` | Sort by name, category, installed state, size, or updates |
+| `d` | Open the visual Doctor |
 | `l` | Focus detailed logs |
+| `w` | Reopen the welcome guide |
 | `?` | Show help |
 | `Esc` | Close search/modal or move back to categories |
 | `q` | Quit when no operation is active |
@@ -169,7 +181,16 @@ The layout hides lower-priority navigation/details panels at small terminal
 widths and remains usable around 80×24. Mutating actions are blocked while a
 worker is active, and quitting waits for the worker to finish. The focused
 category or package pane has a bright border and an `ACTIVE` title. Removal
-confirmations leave user configuration intact.
+confirmations leave user configuration intact. Download operations show bytes,
+speed, and ETA when the server supplies a total; batch operations end with a
+success/failure summary. Unknown catalog sizes are labeled unknown rather than
+guessed.
+
+Starter Packs are curated shortcuts for **42 C/C++**, **Web Development**,
+**Minimal Terminal**, and **Creative** workflows. Press `t`, inspect a pack,
+then press `Enter` or `Space` to add its compatible packages to the basket.
+Press `b` to review and install. Favorites are stored atomically in the small
+state file and appear in the dedicated Favorites category.
 
 ## Command-line interface
 
@@ -216,14 +237,21 @@ desktop = false
 terminal = true
 version = "latest"
 enabled = true
+# Optional byte counts for basket estimates:
+download_size = 12345678
+installed_size = 34567890
+# Optional integrity pin for stable direct downloads:
+sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 ```
 
-Supported source types cover Debian archives (`dpkg -x`), AppImages, tar.gz,
+Supported source types cover Debian archives (`dpkg-deb -x`), AppImages, tar.gz,
 tgz, tar.xz, tar.bz2, ZIP, direct executables, and latest GitHub release assets.
 Identifiers must be lowercase, path-safe, and unique. Architecture is checked
 before download. GitHub `asset_pattern` should narrowly select the correct Linux
 asset. Direct pinned URLs in the catalog carry review notes when they may be
-stale.
+stale. `download_size` and `installed_size` are optional; omit them if not
+verified. `sha256` is optional, but recommended for immutable direct URLs. A
+checksum mismatch deletes the download and aborts before extraction.
 
 Set `enabled = false` for a retired entry that must remain known so an existing
 installation can still be repaired or removed. Disabled packages are hidden
@@ -267,6 +295,18 @@ gpm update zen-browser
 Use `gpm update --all` to refresh every installed application. Application
 replacement is staged and rolled back if integration fails.
 
+### Spotify on Ubuntu 22.04
+
+The Media catalog includes Spotify's own
+`download.spotify.com` build `1.2.74.477.g3be53afe`, pinned by SHA-256. The
+package declares `libc6 >= 2.30`, and inspection of its x86_64 executable found
+no GLIBC symbol newer than 2.30, which fits Ubuntu 22.04's glibc 2.35. Newer
+Spotify repository builds currently require newer glibc and are intentionally
+not selected. Spotify still relies on ordinary desktop libraries already
+provided by the campus Ubuntu image; if one is missing, GoinfrePM will not use
+sudo to add it. Existing Spotify settings and login data under
+`~/.config/spotify` are preserved during normal install, update, and removal.
+
 ```sh
 ./install.sh uninstall
 ```
@@ -289,8 +329,9 @@ are deliberately retained for safety and possible reinstall.
   manager-owned integration filenames. Configuration purge needs an explicit
   CLI flag, package opt-in, and an allowlisted path that clearly matches the
   package.
-- Download signatures are not yet verified. HTTPS protects transport but does
-  not replace publisher signatures or hashes.
+- Fixed downloads can carry a SHA-256 pin (Spotify does); rolling URLs and
+  GitHub assets still rely on HTTPS and upstream release controls rather than
+  package signatures. GoinfrePM does not claim to establish publisher trust.
 - Extracted apps may still depend on system libraries unavailable on a campus
   image. GoinfrePM cannot supply privileged OS packages.
 - GitHub asset matching and pinned vendor URLs can become stale. Review catalog
@@ -331,8 +372,10 @@ Before each release, keep the version identical in `package.json`,
 ```sh
 npm login
 npm whoami
+npm test
 npm pack --dry-run
 npm publish --access public
+npm view goinfre-pm version --registry=https://registry.npmjs.org/
 ```
 
 For the next release, increment all three versions first; npm will reject reuse

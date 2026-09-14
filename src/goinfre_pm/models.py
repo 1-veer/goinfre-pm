@@ -63,6 +63,9 @@ class Package:
     asset_pattern: str = ""
     notes: str = ""
     enabled: bool = True
+    download_size: int | None = None
+    installed_size: int | None = None
+    sha256: str = ""
     post_install: tuple[PostInstallAction, ...] = ()
     selected: bool = field(default=False, compare=False)
 
@@ -72,6 +75,11 @@ class Package:
             raise ValueError(f"{self.identifier}: only HTTPS package sources are allowed")
         if self.source_type not in {"auto", "github", "deb", "appimage", "tar", "zip", "binary"}:
             raise ValueError(f"{self.identifier}: unsupported source type {self.source_type!r}")
+        for label, value in (("download_size", self.download_size), ("installed_size", self.installed_size)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{self.identifier}: {label} must be a non-negative integer")
+        if self.sha256 and not re.fullmatch(r"[0-9a-fA-F]{64}", self.sha256):
+            raise ValueError(f"{self.identifier}: sha256 must contain exactly 64 hexadecimal characters")
 
     @property
     def compatible(self) -> bool:
@@ -86,6 +94,8 @@ class InstalledPackage:
     executable: str
     launchers: list[str] = field(default_factory=list)
     installed_at: str = ""
+    download_size: int | None = None
+    installed_size: int | None = None
 
     @classmethod
     def from_dict(cls, identifier: str, data: dict[str, Any]) -> "InstalledPackage":
@@ -97,4 +107,6 @@ class InstalledPackage:
             executable=str(data.get("executable", "")),
             launchers=[str(item) for item in data.get("launchers", [])],
             installed_at=str(data.get("installed_at", "")),
+            download_size=int(data["download_size"]) if isinstance(data.get("download_size"), int) else None,
+            installed_size=int(data["installed_size"]) if isinstance(data.get("installed_size"), int) else None,
         )

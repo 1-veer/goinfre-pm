@@ -4,7 +4,8 @@ from pathlib import Path
 import os
 import re
 import shutil
-import subprocess
+# The only subprocess is the fixed optional desktop-database command.
+import subprocess  # nosec B404
 
 from .models import Package, validate_package_id
 
@@ -129,7 +130,13 @@ def integrate(package: Package, executable: Path, package_dir: Path | None = Non
         created.append(str(launcher))
         desktop_database = shutil.which("update-desktop-database")
         if desktop_database:
-            subprocess.run([desktop_database, str(DESKTOP_DIR)], timeout=30, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(
+                [desktop_database, str(DESKTOP_DIR)],
+                timeout=30,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     return created
 
 

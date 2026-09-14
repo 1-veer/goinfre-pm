@@ -1,4 +1,5 @@
 from io import BytesIO
+import hashlib
 import json
 
 from goinfre_pm import downloader
@@ -11,6 +12,16 @@ class FakeResponse(BytesIO):
 
     def __exit__(self, *_args):
         self.close()
+
+
+class DownloadResponse(FakeResponse):
+    def __init__(self, payload: bytes, url: str = "https://example.invalid/tool.bin") -> None:
+        super().__init__(payload)
+        self.headers = {"Content-Length": str(len(payload)), "Content-Disposition": 'attachment; filename="tool.bin"'}
+        self._url = url
+
+    def geturl(self) -> str:
+        return self._url
 
 
 def _package() -> Package:
@@ -69,3 +80,31 @@ def test_github_resolver_falls_back_to_recent_stable_desktop_release(monkeypatch
         "https://example.invalid/app.deb",
         "desktop-v2",
     )
+
+
+def test_download_verifies_configured_sha256(monkeypatch, tmp_path) -> None:
+    payload = b"verified application"
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",), sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    monkeypatch.setattr(downloader, "_request", lambda *_args, **_kwargs: DownloadResponse(payload))
+
+    output, _version = downloader.download(package, tmp_path)
+
+    assert output.read_bytes() == payload
+
+
+def test_download_removes_file_on_checksum_mismatch(monkeypatch, tmp_path) -> None:
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",), sha256="0" * 64,
+    )
+    monkeypatch.setattr(downloader, "_request", lambda *_args, **_kwargs: DownloadResponse(b"tampered"))
+
+    try:
+        downloader.download(package, tmp_path)
+        raise AssertionError("checksum mismatch was accepted")
+    except RuntimeError as exc:
+        assert "Checksum mismatch" in str(exc)
+    assert list(tmp_path.iterdir()) == []

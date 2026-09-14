@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=68,<76", "wheel>=0.41,<1"]
+requires = ["setuptools==75.8.2", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "goinfre-pm"
-version = "1.3.0"
+version = "1.4.0"
 description = "A safe no-sudo package manager for writable goinfre storage"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,6 +12,14 @@ license = { file = "LICENSE" }
 authors = [{ name = "veer" }]
 dependencies = [
   "textual==0.83.0",
+  "markdown-it-py[linkify,plugins]==4.2.0",
+  "platformdirs==4.11.8",
+  "rich==15.0.0",
+  "typing-extensions==4.16.0",
+  "mdurl==0.1.2",
+  "linkify-it-py==2.2.0",
+  "mdit-py-plugins==0.6.1",
+  "pygments==2.21.0",
   "tomli==2.0.2; python_version < '3.11'",
 ]
 
