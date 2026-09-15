@@ -35,6 +35,9 @@ def test_release_versions_stay_synchronized() -> None:
 
     assert f'version = "{metadata["version"]}"' in pyproject
     assert f"PROJECT_VERSION='{metadata['version']}'" in branding
+    assert metadata["author"] == "veer"
+    assert 'authors = [{ name = "veer" }]' in pyproject
+    assert "PROJECT_AUTHOR='veer'" in branding
 
 
 def test_npm_bootstrap_uses_argument_arrays_and_never_invokes_sudo() -> None:

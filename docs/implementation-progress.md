@@ -32,7 +32,7 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - [x] Label direct downloads as catalog-managed and failed GitHub checks as unavailable instead of “update unknown”.
 - [x] Prevent normal install actions from replacing installed payloads; retain replacement only through the explicit update command.
 
-## 1.5.0 My Setup and cross-post restore
+## 1.5.0 Auto Setup and cross-post restore
 
 ### Baseline
 
@@ -44,18 +44,36 @@ This file records recoverable checkpoints for the student-experience upgrade.
 
 - [x] Audit roaming state, install-root state, TUI status logic, restore behavior, and npx argument forwarding.
 - [x] Split schema-v3 roaming preferences from the root-local installation manifest.
-- [x] Conservatively migrate only verified legacy payloads; do not enroll old desired packages into My Setup.
+- [x] Conservatively migrate only verified legacy payloads; do not enroll old desired packages into Auto Setup.
 - [x] Add live payload/executable/integration classification and cross-post simulations.
-- [x] Add atomic My Setup persistence, enable/disable controls, root-local locking, and selective restore events.
-- [x] Add explicit reinstall with rollback and safe My Setup-aware removal behavior.
-- [x] Add My Setup / Needs Restore TUI sections, keyboard controls, startup restore, cancellation, and summary states.
+- [x] Add atomic Auto Setup persistence, enable/disable controls, root-local locking, and selective restore events.
+- [x] Add explicit reinstall with rollback and safe Auto Setup-aware removal behavior.
+- [x] Add Auto Setup / Missing Here TUI sections, keyboard controls, startup restore, cancellation, and summary states.
 - [x] Complete documentation, release audit, isolated wheel installation smoke test, and full available validation matrix.
 
 ### Current validation
 
 - Release metadata is synchronized at `1.5.0`.
-- 109 Python tests pass on macOS, including two-post state, selective restore, cancellation, rollback, locking, CLI dispatch, mouse/keyboard My Setup controls, and 80×24 Textual pilots.
+- 109 Python tests pass on macOS, including two-post state, selective restore, cancellation, rollback, locking, CLI dispatch, mouse/keyboard Auto Setup controls, and 80×24 Textual pilots.
 - Python compilation and 3.10 grammar parsing, shell syntax, npm tests, the 28-file npm dry-run package, SVG parsing, and an isolated 1.5.0 wheel build/install/`gpm version` smoke test pass.
 - Bandit reports no medium/high findings; its three low findings are the intentional argument-array subprocesses for `dpkg-deb`, AppImage extraction, and `update-desktop-database`. `pip-audit` reports no known dependency vulnerabilities.
 - `shellcheck` is unavailable locally. Docker is installed but its daemon is not running, so the full Ubuntu 22.04 installer and GUI launch matrix remains a release check on a school workstation.
+- No commit, push, or npm publication has been performed.
+
+## 1.5.1 themes, privacy, and clearer labels
+
+- [x] Rename the user-facing setup labels to Auto Setup and Missing Here.
+- [x] Explain that Missing Here contains Auto Setup apps absent from the current post.
+- [x] Add persistent Purple, Green, Blue, Black, and Red choices to the built-in Ctrl+P palette.
+- [x] Keep the theme in the tiny roaming state while installed manifests and payloads remain in goinfre.
+- [x] Add the `Created by veer 🐧` UI credit and replace public personal-name metadata with `veer`.
+- [x] Complete the 1.5.1 regression and release validation matrix.
+
+### 1.5.1 validation
+
+- Release metadata is synchronized at `1.5.1`; public author metadata is `veer`.
+- 111 Python tests pass on macOS, including Ctrl+P theme discovery, theme persistence, compact roaming state, Auto Setup, cross-post classification, and 80×24 Textual pilots.
+- Python compilation and 3.10 grammar parsing, Textual CSS parsing, shell syntax, npm tests, the intentional 28-file npm dry-run package, SVG parsing, and whitespace checks pass.
+- Bandit reports no medium/high findings, and `pip-audit` reports no known dependency vulnerabilities.
+- `shellcheck` remains unavailable locally. The Ubuntu 22.04 GUI and package-launch matrix remains a release check on a school workstation.
 - No commit, push, or npm publication has been performed.

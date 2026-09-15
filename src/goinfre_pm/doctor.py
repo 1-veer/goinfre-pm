@@ -121,5 +121,5 @@ def collect_doctor_checks(
     setup_detail = f"{len(setup) if isinstance(setup, list) else 0} selected; automatic restore {'enabled' if setup_enabled else 'disabled'}"
     setup_status = "warning" if missing_setup else "ok"
     setup_action = f"Run `gpm setup restore` for: {', '.join(missing_setup)}" if missing_setup else ""
-    checks.append(DoctorCheck(setup_status, "My Setup", setup_detail, setup_action))
+    checks.append(DoctorCheck(setup_status, "Auto Setup", setup_detail, setup_action))
     return checks

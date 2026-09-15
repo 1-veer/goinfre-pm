@@ -122,4 +122,4 @@ def test_setup_cli_add_remove_enable_disable_are_persistent(monkeypatch, tmp_pat
     state.set_setup_package("retired-tool", True)
     assert cli.main(["setup", "remove", "retired-tool"]) == 0
     assert state.read()["setup_packages"] == []
-    assert "My Setup" in capsys.readouterr().out
+    assert "Auto Setup" in capsys.readouterr().out

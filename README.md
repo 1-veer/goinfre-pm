@@ -6,7 +6,7 @@ keeps the package-manager runtime, small state, launchers, icons, and command
 links in the home directory. It does not install system packages or require
 administrator access.
 
-Version 1.5 adds **My Setup**: an explicit roaming list of applications that
+Version 1.5 adds **Auto Setup**: an explicit roaming list of applications that
 GoinfrePM restores when its interactive TUI starts on another post. It verifies
 the current post's payload and executable before claiming an app is installed,
 so a profile in the user's home directory can never create a false Installed
@@ -42,13 +42,14 @@ No large-payload fallback is silently created in ordinary home storage.
 The persistent manager lives at `~/.local/share/goinfre-pm`, and its launcher
 lives at `~/.local/bin/gpm`. Small state and desktop integration live under
 `~/.config/goinfre-pm`, `~/.local/share/applications`, and
-`~/.local/share/icons`. Roaming state contains only preferences such as My
-Setup, favorites, onboarding, and update cache. Installed-package records live
+`~/.local/share/icons`. Roaming state contains only preferences such as Auto
+Setup, the selected UI theme, favorites, onboarding, and update cache. This
+file remains only a few kilobytes. Installed-package records live
 in `<selected-root>/runtime/installed.json`, beside the payloads they describe.
 
 On migration from 1.4, an old home-state installation is imported only when its
 payload and executable are verified in the current root. Old `desired` entries
-are never silently enrolled into My Setup; existing users begin with an empty,
+are never silently enrolled into Auto Setup; existing users begin with an empty,
 disabled setup until they explicitly choose packages.
 
 ## Quick installation with npx
@@ -76,7 +77,7 @@ npx --yes goinfre-pm@latest install zen-browser
 ```
 
 On an ordinary interactive launch, the TUI opens first and then visibly
-restores missing My Setup packages. To skip that restoration once:
+restores missing Auto Setup packages. To skip that restoration once:
 
 ```sh
 npx --yes goinfre-pm@latest --no-restore
@@ -186,8 +187,9 @@ state are not removed.
 | `t` | Open Starter Packs |
 | `b` | Review the current basket and storage estimate |
 | `f` | Add/remove the highlighted package from persistent favorites |
-| `m` / `M` | Toggle highlighted in My Setup / add selected packages to My Setup |
-| `c` | Cancel the current install or remaining My Setup restoration |
+| `m` / `M` | Toggle highlighted in Auto Setup / add selected packages to Auto Setup |
+| `c` | Cancel the current install or remaining Auto Setup restoration |
+| `Ctrl+P` | Open the palette and choose Purple, Green, Blue, Black, or Red |
 | `s` | Sort by name, category, installed state, size, or updates |
 | `d` | Open the visual Doctor |
 | `l` | Focus detailed logs |
@@ -221,26 +223,34 @@ then press `Enter` or `Space` to add its compatible packages to the basket.
 Press `b` to review and install. Favorites are stored atomically in the small
 state file and appear in the dedicated Favorites category.
 
-## My Setup and changing posts
+## Auto Setup and changing posts
 
-`My Setup` is different from the temporary basket and Favorites. Add the
+`Auto Setup` is different from the temporary basket and Favorites. Add the
 highlighted package with `m`, or select several packages with Space and press
-`M`. Mouse users can click the context-aware My Setup button in the details
-pane. The purple diamond marks My Setup membership. Adding a package explicitly
+`M`. Mouse users can click the context-aware Auto Setup button in the details
+pane. The diamond marks Auto Setup membership. Adding a package explicitly
 enables interactive-launch restoration; `gpm setup disable` pauses it without
 forgetting the list.
 
 At interactive startup GoinfrePM checks the selected root and classifies each
-package as **Installed here**, **Repair needed**, **Needs restore**, or **Not
+package as **Installed here**, **Repair needed**, **Missing here**, or **Not
 installed**. A home-directory profile (for example Zen Browser's settings) is
-not installation evidence. Missing My Setup payloads are restored sequentially
-in the task panel, with package count, progress, logs, cancellation, and a final
+not installation evidence. The **Missing Here** section lists Auto Setup apps
+whose payload is absent on the current post; those are the only apps queued for
+cross-post restoration. They are restored sequentially in the task panel, with
+package count, progress, logs, cancellation, and a final
 success/failure/skipped summary. Healthy payloads are never redownloaded or
 automatically updated; broken integration is repaired without downloading.
 
-Failures do not stop later packages. They are shown as Restore failed for the
+Failures do not stop later packages. They are shown as Auto-install failed for the
 current session and may be retried on the next launch or with `gpm setup
 restore`. A root-local lock rejects concurrent install/remove/restore work.
+
+Press `Ctrl+P` and choose **Theme: Purple**, **Green**, **Blue**, **Black**, or
+**Red**. Purple is the default. The chosen theme is stored as one short value in
+the same small roaming preferences file, so it returns after `npx goinfre-pm`
+and on another post. Package payloads and installed-state manifests are never
+moved into the quota-limited home directory for appearance customization.
 
 ## Command-line interface
 
@@ -271,16 +281,16 @@ gpm version
 ```
 
 `restore` is a compatibility shortcut for `setup restore`; both restore only
-missing My Setup packages. `update` resolves the catalog's current release,
+missing Auto Setup packages. `update` resolves the catalog's current release,
 `reinstall` explicitly replaces the payload even when its catalog version has
 not changed, and `repair` recreates root-local metadata, command links, and
 desktop integration without downloading. All preserve ordinary user profiles.
 
-Normal removal also removes the package from My Setup so it does not return on
-the next launch. The TUI offers **Remove + forget**, **Keep in My Setup**, and
+Normal removal also removes the package from Auto Setup so it does not return on
+the next launch. The TUI offers **Remove + forget**, **Keep in Auto Setup**, and
 Cancel; CLI users can request the second behavior with `--keep-setup`.
 Configuration and cache purge remain separate explicit allowlisted options.
-Login autostart is unrelated to My Setup and remains disabled by default.
+Login autostart is unrelated to Auto Setup and remains disabled by default.
 
 ## Package catalog
 
@@ -348,7 +358,7 @@ git pull --ff-only
 
 This updates the persistent local virtual environment, application code,
 catalog, and `~/.local/bin/gpm` launcher while retaining installed applications,
-My Setup preferences, and user configuration. For an existing Zen installation, first
+Auto Setup preferences, the UI theme, and user configuration. For an existing Zen installation, first
 repair its command link without downloading it again. If it still fails, replace
 the payload from the corrected official latest-release URL:
 
@@ -361,7 +371,7 @@ Use `gpm update --all` to refresh every installed application. Application
 replacement is staged and rolled back if integration fails.
 
 Use `gpm reinstall <package>` for an explicit fresh extraction of a healthy
-installed payload. Unlike My Setup restore, reinstall is never automatic.
+installed payload. Unlike Auto Setup restore, reinstall is never automatic.
 
 ### Spotify on Ubuntu 22.04
 
@@ -425,12 +435,12 @@ commands, PATH, state, integrations, catalog validity, and architecture.
   repairs the incomplete environment without sudo.
 - **Application does not launch:** inspect `<root>/logs/<package>.log`, run
   `gpm doctor`, then `gpm repair`.
-- **An app was installed on another post:** add it to My Setup once with `m` or
-  `gpm setup add PACKAGE`. On the new post it appears as Needs restore and is
+- **An app was installed on another post:** add it to Auto Setup once with `m` or
+  `gpm setup add PACKAGE`. On the new post it appears under Missing Here and is
   restored at the next interactive launch. Run `gpm setup restore` to retry now.
 - **Unexpected old Installed status:** version 1.5 no longer trusts roaming
   installation records. Run `gpm doctor`; a valid payload with missing metadata
-  is shown as Repair needed, while an absent payload is Needs restore or Not
+  is shown as Repair needed, while an absent payload is Missing here or Not
   installed.
 - **Pause startup downloads:** run `gpm setup disable`, or use
   `npx goinfre-pm --no-restore` for one launch.

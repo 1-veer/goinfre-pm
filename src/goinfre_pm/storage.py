@@ -15,6 +15,8 @@ from .models import InstalledPackage, validate_package_id
 CONFIG_DIR = Path.home() / ".config" / SLUG
 SETTINGS_FILE = CONFIG_DIR / "config.json"
 STATE_FILE = CONFIG_DIR / "state.json"
+UI_THEMES = ("purple", "green", "blue", "black", "red")
+DEFAULT_UI_THEME = "purple"
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,8 @@ class StateStore:
                     data["onboarding_complete"] = False
                 if not isinstance(data.get("update_cache"), dict):
                     data["update_cache"] = {}
+                if data.get("theme") not in UI_THEMES:
+                    data["theme"] = DEFAULT_UI_THEME
                 if not isinstance(data.get("legacy_installed"), dict):
                     data["legacy_installed"] = {}
                 if not isinstance(data.get("legacy_desired"), list):
@@ -192,6 +196,7 @@ class StateStore:
             "favorites": [],
             "onboarding_complete": False,
             "update_cache": {},
+            "theme": DEFAULT_UI_THEME,
             "legacy_installed": {},
             "legacy_desired": [],
             "legacy_migration_pending": False,
@@ -264,6 +269,14 @@ class StateStore:
         with self._lock:
             data = self.read()
             data["update_cache"][identifier] = value
+            self.write(data)
+
+    def set_theme(self, theme: str) -> None:
+        if theme not in UI_THEMES:
+            raise ValueError(f"Unknown UI theme: {theme}")
+        with self._lock:
+            data = self.read()
+            data["theme"] = theme
             self.write(data)
 
 
