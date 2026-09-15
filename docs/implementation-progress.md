@@ -67,16 +67,30 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - [x] Add persistent Purple, Green, Blue, Black, and Red choices to the built-in Ctrl+P palette.
 - [x] Keep the theme in the tiny roaming state while installed manifests and payloads remain in goinfre.
 - [x] Add the `Made by VEER` UI credit and replace public personal-name metadata with `veer`.
-- [x] Ask before installing Auto Setup apps, list every app that is not ready, and provide Install now / Not now choices.
-- [x] Add a verified, shell-free Launch action for installed desktop applications.
-- [x] Add Doctor cleanup for interrupted downloads, stale staging/backup workdirs, and logs older than 30 days.
 - [x] Complete the 1.5.1 regression and release validation matrix.
 
 ### 1.5.1 validation
 
 - Release metadata is synchronized at `1.5.1`; public author metadata is `veer`.
-- 115 Python tests pass on macOS, including Ctrl+P theme discovery, theme persistence, compact roaming state, the Auto Setup consent prompt, verified launching, allowlisted cleanup, cross-post classification, and 80×24 Textual pilots.
+- 111 Python tests pass on macOS, including Ctrl+P theme discovery, theme persistence, compact roaming state, Auto Setup, cross-post classification, and 80×24 Textual pilots.
 - Python compilation and 3.10 grammar parsing, Textual CSS parsing, shell syntax, npm tests, the intentional 28-file npm dry-run package, SVG parsing, and whitespace checks pass.
 - Bandit reports no medium/high findings, and `pip-audit` reports no known dependency vulnerabilities.
 - `shellcheck` remains unavailable locally. The Ubuntu 22.04 GUI and package-launch matrix remains a release check on a school workstation.
+- No commit, push, or npm publication has been performed.
+
+## 1.5.2 consent, launch, and cleanup follow-up
+
+- [x] Ask before installing Auto Setup apps, list every app that is not ready, and provide Install now / Not now choices.
+- [x] Remove the redundant missing-app navigation section and use clear current-post status wording.
+- [x] Add a verified, shell-free Launch action for installed desktop applications.
+- [x] Add Doctor cleanup for interrupted downloads, stale staging/backup workdirs, and logs older than 30 days.
+- [x] Reflow the installed-app actions into two responsive rows so no button is clipped.
+- [x] Synchronize release metadata at `1.5.2` after npm made `1.5.1` immutable.
+
+### 1.5.2 validation
+
+- 115 Python tests pass on macOS, including Auto Setup consent, verified launching, allowlisted cleanup, and responsive 80×24 modal boundaries.
+- Python compilation and 3.10 grammar parsing, shell syntax, npm tests, package dry-run, and whitespace checks pass.
+- Bandit reports no medium/high findings.
+- Ubuntu 22.04 GUI launch validation remains a release check on a school workstation.
 - No commit, push, or npm publication has been performed.
