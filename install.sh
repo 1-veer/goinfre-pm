@@ -2,10 +2,11 @@
 # Safe, idempotent installer. The manager persists locally; app payloads use goinfre.
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BRANDING_FILE="$SCRIPT_DIR/src/goinfre_pm/project.conf"
 [ -f "$BRANDING_FILE" ] || { printf '%s\n' "Missing project branding configuration: $BRANDING_FILE" >&2; exit 1; }
 # project.conf contains only maintainer-controlled single-quoted assignments.
+# shellcheck disable=SC1090,SC1091
 . "$BRANDING_FILE"
 
 if [ -t 1 ]; then
@@ -260,9 +261,9 @@ append_path() {
     ok "Updated $rcfile (backup: $rcfile.gpm.bak when it previously existed)"
 }
 
-append_path "$HOME/.bashrc" 'export PATH="$HOME/.local/bin:$PATH"' '# Goinfre package manager PATH'
-append_path "$HOME/.zshrc" 'export PATH="$HOME/.local/bin:$PATH"' '# Goinfre package manager PATH'
-append_path "$HOME/.config/fish/config.fish" 'fish_add_path -g $HOME/.local/bin' '# Goinfre package manager PATH'
+append_path "$HOME/.bashrc" "export PATH=\"\$HOME/.local/bin:\$PATH\"" '# Goinfre package manager PATH'
+append_path "$HOME/.zshrc" "export PATH=\"\$HOME/.local/bin:\$PATH\"" '# Goinfre package manager PATH'
+append_path "$HOME/.config/fish/config.fish" "fish_add_path -g \$HOME/.local/bin" '# Goinfre package manager PATH'
 
 printf '\n%b%s %s installed%b\n' "$BOLD$VIOLET" "$PROJECT_DISPLAY_NAME" "$PROJECT_VERSION" "$RESET"
 ok "Command: $LAUNCHER"
