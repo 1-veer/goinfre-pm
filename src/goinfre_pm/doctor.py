@@ -10,6 +10,7 @@ import sys
 from .config import ConfigurationError, load_packages
 from .experience import human_size
 from .integration import DESKTOP_DIR, USER_BIN, find_executable
+from .installer import cleanup_report
 from .models import Package, validate_package_id
 from .storage import Layout, LocalStateStore, StateStore, available_space, is_writable_directory, resolve_install_root
 
@@ -122,4 +123,19 @@ def collect_doctor_checks(
     setup_status = "warning" if missing_setup else "ok"
     setup_action = f"Run `gpm setup restore` for: {', '.join(missing_setup)}" if missing_setup else ""
     checks.append(DoctorCheck(setup_status, "Auto Setup", setup_detail, setup_action))
+    if layout is not None:
+        disposable = cleanup_report(layout)
+        cleanup_detail = (
+            f"{disposable.count} item{'s' if disposable.count != 1 else ''} · {human_size(disposable.total_bytes)} reclaimable"
+            if disposable.count
+            else "Nothing to clean"
+        )
+        checks.append(
+            DoctorCheck(
+                "warning" if disposable.count else "ok",
+                "Temporary files",
+                cleanup_detail,
+                "Choose Clean temporary files below." if disposable.count else "",
+            )
+        )
     return checks

@@ -80,6 +80,43 @@ def test_install_rejects_a_repairable_payload_with_actionable_choices(tmp_path: 
         next(manager.install("tool"))
 
 
+def test_launch_uses_verified_executable_without_a_shell(monkeypatch, tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        executable_candidates=("bin/tool",),
+        desktop=False,
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    executable = layout.apps / "tool" / "bin" / "tool"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    class Process:
+        pid = 4242
+
+    def fake_popen(arguments, **options):
+        calls.append((arguments, options))
+        return Process()
+
+    monkeypatch.setattr("goinfre_pm.installer.subprocess.Popen", fake_popen)
+
+    assert manager.launch("tool") == 4242
+    assert calls[0][0] == [str(executable)]
+    assert calls[0][1]["cwd"] == str(executable.parent)
+    assert calls[0][1]["start_new_session"] is True
+    assert "shell" not in calls[0][1]
+
+
 def test_update_rejects_a_package_that_is_not_installed(tmp_path: Path) -> None:
     package = Package(
         identifier="tool",

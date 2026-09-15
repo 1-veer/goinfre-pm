@@ -130,13 +130,22 @@ def test_installed_packages_are_not_offered_to_install(monkeypatch, tmp_path) ->
     async def scenario() -> None:
         app = app_module.GoinfrePMApp()
         calls: list[tuple[list[Package], str]] = []
+        launched: list[str] = []
         app._run_packages = lambda selected, remove: calls.append((selected, remove))  # type: ignore[method-assign]
+        app.manager.launch = lambda identifier: launched.append(identifier) or 4242  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.3)
-            await pilot.press("right", "i")
-            assert isinstance(app.screen, app_module.PackageActionModal)
-            assert calls == []
             await pilot.press("right", "enter")
+            assert isinstance(app.screen, app_module.PackageActionModal)
+            assert app.screen.query_one("#launch", Button).has_focus
+            assert calls == []
+            await pilot.press("enter")
+            await pilot.pause()
+            assert launched == [packages[0].identifier]
+
+            await pilot.press("i")
+            assert isinstance(app.screen, app_module.PackageActionModal)
+            await pilot.press("right", "right", "enter")
             await pilot.pause()
             assert calls == [([packages[0]], "reinstall")]
 
@@ -454,6 +463,39 @@ def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypa
             await pilot.press("down")
             assert doctor_table.cursor_row == 1
             await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
+def test_doctor_can_clean_only_reported_temporary_files(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    root = tmp_path / "goinfre-pm"
+    temporary = root / "downloads" / "interrupted"
+    temporary.mkdir(parents=True)
+    (temporary / "archive.part").write_bytes(b"temporary data")
+    installed = root / "apps" / "keep-me"
+    installed.mkdir(parents=True)
+    (installed / "payload").write_bytes(b"installed data")
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: root)
+    monkeypatch.setattr(app_module, "load_packages", _packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("d")
+            assert isinstance(app.screen, app_module.DoctorModal)
+            assert "Clean" in str(app.screen.query_one("#clean", Button).label)
+            await pilot.press("right")
+            assert app.screen.query_one("#clean", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause(0.5)
+            assert not temporary.exists()
+            assert installed.is_dir()
+            assert not app.busy
+            assert "Cleaned 1 temporary item" in str(app.query_one("#logs").lines[0])
 
     asyncio.run(scenario())
 

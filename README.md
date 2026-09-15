@@ -180,7 +180,7 @@ state are not removed.
 | `→` / `←` | Move focus from categories to packages / back to categories |
 | `Space` | Select or deselect (`☐` / `☑`; favorites show `★`) |
 | `/` | Search |
-| `Enter` | Refresh/view details |
+| `Enter` | Open actions for an installed desktop application |
 | `i` / `I` | Install highlighted or open installed-app actions / review basket |
 | `r` / `R` | Confirm and remove highlighted / selected |
 | `a` | Select/deselect visible packages |
@@ -209,9 +209,18 @@ success/failure summary. Unknown catalog sizes are labeled unknown rather than
 guessed.
 
 Installed applications cannot be accidentally installed again. The basket
-skips them, while `i` opens an explicit Update / Reinstall / Repair / Cancel
-dialog. Reinstall preserves the user's profile and cache and uses the same
+skips them, while `Enter` or `i` opens a concise **Launch / Update / Reinstall /
+Repair / Cancel** dialog for installed desktop applications. Launch starts only
+the verified executable inside that package's goinfre directory and never uses
+a shell. Reinstall preserves the user's profile and cache and uses the same
 staging, atomic replacement, and rollback path as updates.
+
+Doctor reports safely reclaimable storage and shows one **Clean** button only
+when cleanup is available. Cleanup is limited to interrupted downloads, hidden
+installation staging/backup directories created by GoinfrePM, and package logs
+older than 30 days. It reacquires the normal operation lock and rescans before
+deleting. Installed applications, current logs, user profiles, configuration,
+and files outside the selected goinfre root are never cleanup targets.
 
 Automatic update comparison is available for GitHub-release packages. Direct,
 pinned vendor downloads are shown as **catalog-managed** because their upstream
