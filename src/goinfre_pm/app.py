@@ -86,18 +86,20 @@ class PackageActionModal(ModalScreen[str | None]):
                 "your profile and cache will remain untouched.",
                 classes="modal-copy",
             )
-            with Horizontal(classes="modal-buttons action-buttons"):
-                if self.launchable:
-                    yield Button("Launch", variant="primary", id="launch")
-                yield Button(
-                    "Update",
-                    variant="default" if self.launchable else "primary",
-                    id="update",
-                    disabled=not self.package.enabled or not self.package.compatible,
-                )
-                yield Button("Reinstall", id="reinstall", disabled=not self.package.enabled or not self.package.compatible)
-                yield Button("Repair", id="repair", disabled=not self.repairable)
-                yield Button("Cancel", id="cancel")
+            with Vertical(classes="action-buttons"):
+                with Horizontal(classes="action-button-row"):
+                    if self.launchable:
+                        yield Button("Launch", variant="primary", id="launch")
+                    yield Button(
+                        "Update",
+                        variant="default" if self.launchable else "primary",
+                        id="update",
+                        disabled=not self.package.enabled or not self.package.compatible,
+                    )
+                    yield Button("Reinstall", id="reinstall", disabled=not self.package.enabled or not self.package.compatible)
+                with Horizontal(classes="action-button-row"):
+                    yield Button("Repair", id="repair", disabled=not self.repairable)
+                    yield Button("Cancel", id="cancel")
 
     def on_mount(self) -> None:
         next(button for button in self.query(Button) if not button.disabled).focus()
