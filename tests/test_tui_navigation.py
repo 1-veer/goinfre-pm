@@ -1,5 +1,6 @@
 import asyncio
 
+from textual.command import CommandPalette
 from textual.widgets import Button, DataTable, Input, OptionList
 
 from goinfre_pm import app as app_module
@@ -198,15 +199,57 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
             marker = str(app.query_one(DataTable).get_row(packages[0].identifier)[0])
             assert "◆" in marker
 
-            app.category = "My Setup"
+            app.category = "Auto Setup"
             app._refresh()
             assert [package.identifier for package in app.visible_packages] == [packages[0].identifier]
-            assert "Needs restore" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
-            assert str(app.query_one("#setup-toggle-button", Button).label) == "Remove from My Setup"
+            assert "Missing here" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
+            assert str(app.query_one("#setup-toggle-button", Button).label) == "Remove from Auto Setup"
 
             await pilot.click("#setup-toggle-button")
             await pilot.pause()
             assert state.read()["setup_packages"] == []
+
+    asyncio.run(scenario())
+
+
+def test_ctrl_p_themes_and_creator_are_persistent(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", _packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        first = app_module.GoinfrePMApp(auto_restore=False)
+        async with first.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            assert first.has_class("theme-purple")
+            assert "Created by veer 🐧" in str(first.query_one("#creator").renderable)
+            commands = list(first.get_system_commands(first.screen))
+            theme_commands = [command for command in commands if command.title.startswith("Theme:")]
+            assert {command.title.split()[1] for command in theme_commands} == {
+                "Purple",
+                "Green",
+                "Blue",
+                "Black",
+                "Red",
+            }
+
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            assert isinstance(first.screen, CommandPalette)
+            await pilot.press("escape")
+
+            for theme in ("green", "blue", "black", "red", "purple", "green"):
+                first.set_ui_theme(theme)
+                assert first.has_class(f"theme-{theme}")
+                assert state.read()["theme"] == theme
+
+        second = app_module.GoinfrePMApp(auto_restore=False)
+        async with second.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            assert second.ui_theme == "green"
+            assert second.has_class("theme-green")
 
     asyncio.run(scenario())
 
@@ -237,7 +280,7 @@ def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_pa
             await pilot.pause(0.6)
             assert restored == [[package.identifier for package in packages]]
             assert isinstance(app.screen, app_module.SummaryModal)
-            assert "My Setup restore complete" in str(app.screen.query_one(".modal-title").renderable)
+            assert "Auto Setup restore complete" in str(app.screen.query_one(".modal-title").renderable)
 
         skipped: list[object] = []
         no_restore = app_module.GoinfrePMApp(auto_restore=False)
@@ -322,7 +365,7 @@ def test_failed_restore_is_visible_for_the_current_session(monkeypatch, tmp_path
             await pilot.pause(0.6)
             assert app.runtime_status[packages[0].identifier] == "failed"
             table = app.screen_stack[0].query_one(DataTable)
-            assert "Restore failed" in str(table.get_row(packages[0].identifier)[3])
+            assert "Auto-install failed" in str(table.get_row(packages[0].identifier)[3])
             assert isinstance(app.screen, app_module.SummaryModal)
 
     asyncio.run(scenario())

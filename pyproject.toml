@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "goinfre-pm"
-version = "1.5.0"
+version = "1.5.1"
 description = "A safe no-sudo package manager for writable goinfre storage"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "Ayoub Bougatia" }]
+authors = [{ name = "veer" }]
 dependencies = [
   "textual==0.83.0",
   "markdown-it-py[linkify,plugins]==4.2.0",

@@ -2,7 +2,7 @@
 
 This repository is a substantial refactor of pre-existing package-manager code
 supplied without a license file or embedded copyright notices. The refactor and
-current project stewardship are by Ayoub Bougatia; this notice does not claim
+current project stewardship are by veer; this notice does not claim
 that all inherited ideas or code were originally authored by one person.
 
 The supplied earlier README credited Fixgoinfre and zero-tow as inspiration.

@@ -19,6 +19,7 @@ Screen { background: $gpm-background; color: $gpm-text; layers: base overlay; }
 .panel:focus-within { border: heavy $gpm-violet; border-title-color: $gpm-text; }
 #categories { width: 22; min-width: 16; }
 #categories OptionList { height: 1fr; background: $gpm-panel; border: none; }
+#creator { dock: bottom; height: 3; color: $gpm-muted; text-align: center; content-align: center middle; border-top: solid #49325e; }
 #categories OptionList > .option-list--option-highlighted { background: #4c1d70; color: $gpm-text; }
 #categories OptionList:focus > .option-list--option-highlighted { background: $gpm-violet; color: $gpm-background; text-style: bold; }
 #catalog { width: 2fr; min-width: 38; }
@@ -66,3 +67,97 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
     text-align: center;
     content-align: center middle;
 }
+
+/* Theme classes live on the App so they also color modal screens and the
+   built-in Ctrl+P command palette. Purple above remains the default. */
+.theme-green Screen { background: #07110c; color: #f1f7f3; }
+.theme-green #header, .theme-green #tasks, .theme-green Footer { background: #14251b; }
+.theme-green #header { border-bottom: solid #22c55e; }
+.theme-green .panel { background: #0d1a13; border: round #28533a; }
+.theme-green .panel:focus-within { border: heavy #22c55e; }
+.theme-green #categories OptionList, .theme-green #package-table { background: #0d1a13; }
+.theme-green #categories OptionList > .option-list--option-highlighted,
+.theme-green #package-table > .datatable--cursor { background: #166534; color: #f1f7f3; }
+.theme-green #categories OptionList:focus > .option-list--option-highlighted,
+.theme-green #package-table:focus > .datatable--cursor { background: #22c55e; color: #07110c; }
+.theme-green #brand, .theme-green #basket-status, .theme-green #operation,
+.theme-green .modal-title { color: #86efac; }
+.theme-green #details-body, .theme-green #logs, .theme-green #creator { color: #94a39a; }
+.theme-green #creator { border-top: solid #28533a; }
+.theme-green #tasks { border-top: solid #28533a; }
+.theme-green #progress { color: #22c55e; }
+.theme-green #search, .theme-green .modal { background: #14251b; border: round #22c55e; }
+.theme-green #splash { background: #07110c; color: #86efac; }
+.theme-green Button.-primary { background: #22c55e; color: #07110c; }
+.theme-green CommandPalette > Vertical { background: #22c55e 20%; }
+.theme-green CommandPalette #--input { border: round #22c55e; }
+.theme-green CommandList > .option-list--option-highlighted { background: #22c55e; color: #07110c; }
+
+.theme-blue Screen { background: #070b14; color: #f2f6fc; }
+.theme-blue #header, .theme-blue #tasks, .theme-blue Footer { background: #14213a; }
+.theme-blue #header { border-bottom: solid #3b82f6; }
+.theme-blue .panel { background: #0d1524; border: round #294a78; }
+.theme-blue .panel:focus-within { border: heavy #3b82f6; }
+.theme-blue #categories OptionList, .theme-blue #package-table { background: #0d1524; }
+.theme-blue #categories OptionList > .option-list--option-highlighted,
+.theme-blue #package-table > .datatable--cursor { background: #1e3a8a; color: #f2f6fc; }
+.theme-blue #categories OptionList:focus > .option-list--option-highlighted,
+.theme-blue #package-table:focus > .datatable--cursor { background: #3b82f6; color: #070b14; }
+.theme-blue #brand, .theme-blue #basket-status, .theme-blue #operation,
+.theme-blue .modal-title { color: #93c5fd; }
+.theme-blue #details-body, .theme-blue #logs, .theme-blue #creator { color: #94a3b8; }
+.theme-blue #creator { border-top: solid #294a78; }
+.theme-blue #tasks { border-top: solid #294a78; }
+.theme-blue #progress { color: #3b82f6; }
+.theme-blue #search, .theme-blue .modal { background: #14213a; border: round #3b82f6; }
+.theme-blue #splash { background: #070b14; color: #93c5fd; }
+.theme-blue Button.-primary { background: #3b82f6; color: #070b14; }
+.theme-blue CommandPalette > Vertical { background: #3b82f6 20%; }
+.theme-blue CommandPalette #--input { border: round #3b82f6; }
+.theme-blue CommandList > .option-list--option-highlighted { background: #3b82f6; color: #070b14; }
+
+.theme-black Screen { background: #030303; color: #f5f5f5; }
+.theme-black #header, .theme-black #tasks, .theme-black Footer { background: #151515; }
+.theme-black #header { border-bottom: solid #d4d4d4; }
+.theme-black .panel { background: #0b0b0b; border: round #383838; }
+.theme-black .panel:focus-within { border: heavy #d4d4d4; }
+.theme-black #categories OptionList, .theme-black #package-table { background: #0b0b0b; }
+.theme-black #categories OptionList > .option-list--option-highlighted,
+.theme-black #package-table > .datatable--cursor { background: #404040; color: #f5f5f5; }
+.theme-black #categories OptionList:focus > .option-list--option-highlighted,
+.theme-black #package-table:focus > .datatable--cursor { background: #e5e5e5; color: #030303; }
+.theme-black #brand, .theme-black #basket-status, .theme-black #operation,
+.theme-black .modal-title { color: #d4d4d4; }
+.theme-black #details-body, .theme-black #logs, .theme-black #creator { color: #a3a3a3; }
+.theme-black #creator { border-top: solid #383838; }
+.theme-black #tasks { border-top: solid #383838; }
+.theme-black #progress { color: #d4d4d4; }
+.theme-black #search, .theme-black .modal { background: #151515; border: round #d4d4d4; }
+.theme-black #splash { background: #030303; color: #d4d4d4; }
+.theme-black Button.-primary { background: #d4d4d4; color: #030303; }
+.theme-black CommandPalette > Vertical { background: #d4d4d4 20%; }
+.theme-black CommandPalette #--input { border: round #d4d4d4; }
+.theme-black CommandList > .option-list--option-highlighted { background: #d4d4d4; color: #030303; }
+
+.theme-red Screen { background: #120708; color: #fbf3f3; }
+.theme-red #header, .theme-red #tasks, .theme-red Footer { background: #2b1517; }
+.theme-red #header { border-bottom: solid #ef4444; }
+.theme-red .panel { background: #201011; border: round #6b2b30; }
+.theme-red .panel:focus-within { border: heavy #ef4444; }
+.theme-red #categories OptionList, .theme-red #package-table { background: #201011; }
+.theme-red #categories OptionList > .option-list--option-highlighted,
+.theme-red #package-table > .datatable--cursor { background: #7f1d1d; color: #fbf3f3; }
+.theme-red #categories OptionList:focus > .option-list--option-highlighted,
+.theme-red #package-table:focus > .datatable--cursor { background: #ef4444; color: #120708; }
+.theme-red #brand, .theme-red #basket-status, .theme-red #operation,
+.theme-red .modal-title { color: #fca5a5; }
+.theme-red #details-body, .theme-red #logs, .theme-red #creator { color: #b9a0a2; }
+.theme-red #creator { border-top: solid #6b2b30; }
+.theme-red #tasks { border-top: solid #6b2b30; }
+.theme-red #progress { color: #ef4444; }
+.theme-red #search, .theme-red .modal { background: #2b1517; border: round #ef4444; }
+.theme-red #splash { background: #120708; color: #fca5a5; }
+.theme-red Button.-primary { background: #ef4444; color: #120708; }
+.theme-red CommandPalette > Vertical { background: #ef4444 20%; }
+.theme-red CommandPalette #--input { border: round #ef4444; }
+.theme-red CommandList > .option-list--option-highlighted { background: #ef4444; color: #120708; }

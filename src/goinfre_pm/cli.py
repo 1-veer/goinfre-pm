@@ -47,7 +47,7 @@ def _emit(events: object) -> bool:
             print(f"Progress: {value}%", end="\r" if value != 100 else "\n")
         elif kind == "package":
             identifier, index, total = value
-            print(f"Restoring My Setup — package {index} of {total}: {identifier}")
+            print(f"Restoring Auto Setup — package {index} of {total}: {identifier}")
         elif kind == "failed":
             identifier, reason = value
             print(f"Failed {identifier}: {reason}", file=sys.stderr)
@@ -98,7 +98,7 @@ def doctor() -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=COMMAND, description=f"{DISPLAY_NAME} — no-sudo goinfre package manager")
-    parser.add_argument("--no-restore", action="store_true", help="skip automatic My Setup restoration for this launch")
+    parser.add_argument("--no-restore", action="store_true", help="skip automatic Auto Setup restoration for this launch")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("list", help="list packages")
     search = sub.add_parser("search", help="search packages")
@@ -112,18 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("packages", nargs="+")
     remove.add_argument("--purge-cache", action="store_true")
     remove.add_argument("--purge-config", action="store_true", help="explicitly remove allowlisted user configuration")
-    remove.add_argument("--keep-setup", action="store_true", help="keep removed packages in My Setup")
+    remove.add_argument("--keep-setup", action="store_true", help="keep removed packages in Auto Setup")
     sub.add_parser("repair", help="repair launchers and symlinks")
-    sub.add_parser("restore", help="restore missing My Setup packages")
-    setup = sub.add_parser("setup", help="manage the roaming My Setup package list")
+    sub.add_parser("restore", help="restore missing Auto Setup packages")
+    setup = sub.add_parser("setup", help="manage the roaming Auto Setup package list")
     setup_sub = setup.add_subparsers(dest="setup_command")
-    setup_sub.add_parser("list", help="show My Setup")
+    setup_sub.add_parser("list", help="show Auto Setup")
     for name in ("add", "remove"):
-        setup_packages = setup_sub.add_parser(name, help=f"{name} packages {'to' if name == 'add' else 'from'} My Setup")
+        setup_packages = setup_sub.add_parser(name, help=f"{name} packages {'to' if name == 'add' else 'from'} Auto Setup")
         setup_packages.add_argument("packages", nargs="+")
-    setup_sub.add_parser("restore", help="restore missing My Setup packages now")
+    setup_sub.add_parser("restore", help="restore missing Auto Setup packages now")
     setup_sub.add_parser("enable", help="enable restore when the interactive TUI starts")
-    setup_sub.add_parser("disable", help="disable automatic restore without clearing My Setup")
+    setup_sub.add_parser("disable", help="disable automatic restore without clearing Auto Setup")
     path = sub.add_parser("path", help="show or set install path")
     path_sub = path.add_subparsers(dest="path_command")
     path_set = path_sub.add_parser("set", help="persist an explicit writable root")
@@ -228,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             setup_command = args.setup_command or "list"
             if setup_command == "list":
                 enabled = "enabled" if data.get("setup_enabled") else "disabled"
-                print(f"My Setup automatic restore: {enabled}")
+                print(f"Auto Setup automatic restore: {enabled}")
                 packages = data.get("setup_packages", [])
                 if packages:
                     for identifier in packages:
@@ -248,14 +248,14 @@ def main(argv: list[str] | None = None) -> int:
                 state.set_setup_packages(selected, setup_command == "add")
                 for identifier in selected:
                     label = catalog[identifier].name if identifier in catalog else identifier
-                    print(f"{label}: {'added to' if setup_command == 'add' else 'removed from'} My Setup")
+                    print(f"{label}: {'added to' if setup_command == 'add' else 'removed from'} Auto Setup")
             elif setup_command == "restore":
                 if _emit(_manager().restore()):
                     return 1
             elif setup_command in {"enable", "disable"}:
                 enabled = setup_command == "enable"
                 state.set_setup_enabled(enabled)
-                print(f"My Setup automatic restore {'enabled' if enabled else 'disabled'}.")
+                print(f"Auto Setup automatic restore {'enabled' if enabled else 'disabled'}.")
         elif args.command == "path":
             if args.path_command == "set":
                 root = args.directory.expanduser().resolve()

@@ -2,9 +2,19 @@ from pathlib import Path
 import json
 import threading
 
+import pytest
+
 from goinfre_pm.installer import PackageManager
 from goinfre_pm.models import InstalledPackage, Package
-from goinfre_pm.storage import Layout, LocalStateStore, StateStore, atomic_json_write, resolve_install_root
+from goinfre_pm.storage import (
+    DEFAULT_UI_THEME,
+    UI_THEMES,
+    Layout,
+    LocalStateStore,
+    StateStore,
+    atomic_json_write,
+    resolve_install_root,
+)
 
 
 def package(identifier: str = "tool") -> Package:
@@ -44,7 +54,24 @@ def test_new_roaming_state_does_not_claim_installations_or_enable_setup(tmp_path
     assert data["schema"] == 3
     assert data["setup_packages"] == []
     assert data["setup_enabled"] is False
+    assert data["theme"] == DEFAULT_UI_THEME
     assert "installed" not in data
+
+
+def test_theme_preference_is_tiny_validated_and_persistent(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    for theme in UI_THEMES:
+        store.set_theme(theme)
+        assert store.read()["theme"] == theme
+    assert path.stat().st_size < 4096
+
+    with pytest.raises(ValueError, match="Unknown UI theme"):
+        store.set_theme("orange")
+    data = store.read()
+    data["theme"] = "invalid"
+    store.write(data)
+    assert store.read()["theme"] == DEFAULT_UI_THEME
 
 
 def test_my_setup_add_remove_and_enable_are_atomic(tmp_path: Path) -> None:
