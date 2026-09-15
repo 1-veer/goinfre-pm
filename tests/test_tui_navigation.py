@@ -4,7 +4,7 @@ from textual.widgets import Button, DataTable, Input, OptionList
 
 from goinfre_pm import app as app_module
 from goinfre_pm.models import InstalledPackage, Package
-from goinfre_pm.storage import StateStore
+from goinfre_pm.storage import Layout, LocalStateStore, StateStore
 
 
 def _packages() -> list[Package]:
@@ -108,7 +108,7 @@ def test_installed_packages_are_not_offered_to_install(monkeypatch, tmp_path) ->
     executable.chmod(0o755)
     state = StateStore(tmp_path / "state.json")
     state.set_onboarding_complete()
-    state.set_installed(
+    LocalStateStore(Layout.at(root)).set_installed(
         InstalledPackage(
             packages[0].identifier,
             "1.0",
@@ -117,20 +117,27 @@ def test_installed_packages_are_not_offered_to_install(monkeypatch, tmp_path) ->
             [],
             "earlier",
         ),
-        install_root=root,
     )
+    user_bin = tmp_path / "bin"
+    user_bin.mkdir()
+    (user_bin / packages[0].identifier).symlink_to(executable)
+    monkeypatch.setattr("goinfre_pm.integration.USER_BIN", user_bin)
     monkeypatch.setattr(app_module, "resolve_install_root", lambda: root)
     monkeypatch.setattr(app_module, "load_packages", lambda: packages)
     monkeypatch.setattr(app_module, "StateStore", lambda: state)
 
     async def scenario() -> None:
         app = app_module.GoinfrePMApp()
-        calls: list[tuple[list[Package], bool]] = []
+        calls: list[tuple[list[Package], str]] = []
         app._run_packages = lambda selected, remove: calls.append((selected, remove))  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.3)
             await pilot.press("right", "i")
+            assert isinstance(app.screen, app_module.PackageActionModal)
             assert calls == []
+            await pilot.press("right", "enter")
+            await pilot.pause()
+            assert calls == [([packages[0]], "reinstall")]
 
             table = app.query_one(DataTable)
             installed_marker = str(table.get_row(packages[0].identifier)[0])
@@ -173,6 +180,154 @@ def test_onboarding_is_skippable_and_only_shown_once(monkeypatch, tmp_path) -> N
     asyncio.run(scenario())
 
 
+def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
+    packages = _packages()
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("right", "m")
+            assert state.read()["setup_packages"] == [packages[0].identifier]
+            assert state.read()["setup_enabled"] is True
+            marker = str(app.query_one(DataTable).get_row(packages[0].identifier)[0])
+            assert "◆" in marker
+
+            app.category = "My Setup"
+            app._refresh()
+            assert [package.identifier for package in app.visible_packages] == [packages[0].identifier]
+            assert "Needs restore" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
+            assert str(app.query_one("#setup-toggle-button", Button).label) == "Remove from My Setup"
+
+            await pilot.click("#setup-toggle-button")
+            await pilot.pause()
+            assert state.read()["setup_packages"] == []
+
+    asyncio.run(scenario())
+
+
+def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:2]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_packages([package.identifier for package in packages], True)
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        restored: list[list[str]] = []
+        app = app_module.GoinfrePMApp(auto_restore=True)
+
+        def fake_restore(_cancel, identifiers, **_callbacks):
+            restored.append(list(identifiers))
+            total = len(identifiers)
+            for index, identifier in enumerate(identifiers, 1):
+                yield ("package", (identifier, index, total))
+                yield ("log", f"restored {identifier}")
+                yield ("restored", identifier)
+
+        app.manager.restore = fake_restore  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.6)
+            assert restored == [[package.identifier for package in packages]]
+            assert isinstance(app.screen, app_module.SummaryModal)
+            assert "My Setup restore complete" in str(app.screen.query_one(".modal-title").renderable)
+
+        skipped: list[object] = []
+        no_restore = app_module.GoinfrePMApp(auto_restore=False)
+        no_restore.manager.restore = lambda *_args: skipped.append(True) or iter(())  # type: ignore[method-assign]
+        async with no_restore.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.5)
+            assert skipped == []
+            assert not isinstance(no_restore.screen, app_module.SummaryModal)
+
+        state.set_setup_enabled(False)
+        disabled: list[object] = []
+        paused = app_module.GoinfrePMApp(auto_restore=True)
+        paused.manager.restore = lambda *_args, **_kwargs: disabled.append(True) or iter(())  # type: ignore[method-assign]
+        async with paused.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.5)
+            assert disabled == []
+            assert not isinstance(paused.screen, app_module.SummaryModal)
+
+    asyncio.run(scenario())
+
+
+def test_cancel_key_and_my_setup_removal_choice_are_keyboard_safe(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:1]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_package(packages[0].identifier, True)
+    root = tmp_path / "goinfre-pm"
+    executable = root / "apps" / packages[0].identifier / packages[0].identifier
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    LocalStateStore(Layout.at(root)).set_installed(
+        InstalledPackage(packages[0].identifier, "1", packages[0].url, str(executable))
+    )
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: root)
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        calls: list[tuple[list[Package], str, bool]] = []
+        app._run_packages = (  # type: ignore[method-assign]
+            lambda selected, operation, keep_setup=False: calls.append((selected, operation, keep_setup))
+        )
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            app.busy = True
+            await pilot.press("c")
+            assert app.cancel_event.is_set()
+            app.busy = False
+
+            await pilot.press("right", "r")
+            assert isinstance(app.screen, app_module.RemovalChoiceModal)
+            assert app.screen.query_one("#forget", Button).has_focus
+            await pilot.press("right", "enter")
+            await pilot.pause()
+            assert calls == [(packages, "remove", True)]
+            assert app.is_running
+
+    asyncio.run(scenario())
+
+
+def test_failed_restore_is_visible_for_the_current_session(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:1]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_package(packages[0].identifier, True)
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=True)
+
+        def failed_restore(_cancel, identifiers, **_callbacks):
+            identifier = identifiers[0]
+            yield ("package", (identifier, 1, 1))
+            yield ("failed", (identifier, "offline"))
+
+        app.manager.restore = failed_restore  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.6)
+            assert app.runtime_status[packages[0].identifier] == "failed"
+            table = app.screen_stack[0].query_one(DataTable)
+            assert "Restore failed" in str(table.get_row(packages[0].identifier)[3])
+            assert isinstance(app.screen, app_module.SummaryModal)
+
+    asyncio.run(scenario())
+
+
 def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypatch, tmp_path) -> None:
     packages = _packages()
     state = StateStore(tmp_path / "state.json")
@@ -193,7 +348,7 @@ def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypa
             assert {package.identifier for package in packages if package.selected} == {
                 "vscodium", "kitty", "github-cli", "lazygit"
             }
-            assert state.read()["installed"] == {}
+            assert app.manager.installations.read()["installed"] == {}
 
             await pilot.press("b")
             assert isinstance(app.screen, app_module.BasketModal)
@@ -250,7 +405,7 @@ def test_progress_and_completion_summary(monkeypatch, tmp_path) -> None:
             assert "1.0 KiB/4.0 KiB" in operation
             assert "ETA 6s" in operation
 
-            app._show_summary([package], [], False, 1.2)
+            app._show_summary([package], [], "install", 1.2)
             assert isinstance(app.screen, app_module.SummaryModal)
             assert package.selected is False
             await pilot.press("enter")
@@ -281,6 +436,18 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             doctor = narrow.screen.query_one(".doctor-modal")
             assert doctor.region.height <= 24
             assert doctor.region.width <= 80
+            await pilot.press("escape")
+            narrow.push_screen(app_module.PackageActionModal(_packages()[0], True))
+            await pilot.pause()
+            action = narrow.screen.query_one(".action-modal")
+            assert action.region.height <= 24
+            assert action.region.width <= 80
+            await pilot.press("escape")
+            narrow.push_screen(app_module.RemovalChoiceModal(1))
+            await pilot.pause()
+            removal = narrow.screen.query_one(".removal-modal")
+            assert removal.region.height <= 24
+            assert removal.region.width <= 80
             await pilot.press("escape")
 
         wide = app_module.GoinfrePMApp()

@@ -20,3 +20,12 @@ def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
     assert "require_command curl" not in installer
     assert "require_command dpkg-deb" not in installer
     assert "sudo apt" not in installer
+
+
+def test_manager_update_preserves_root_local_installation_manifest() -> None:
+    installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
+
+    assert 'mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/runtime" "$GPM_ROOT/logs"' in installer
+    assert 'rm -rf "$GPM_ROOT/venv" "$GPM_ROOT/runtime"' not in installer
+    assert 'rm -f "$GPM_ROOT/runtime/packages.toml" "$GPM_ROOT/runtime/project.conf"' in installer
+    assert 'Refusing symlinked storage directory' in installer

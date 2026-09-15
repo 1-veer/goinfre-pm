@@ -3,7 +3,7 @@ from pathlib import Path
 from goinfre_pm import cli, doctor
 from goinfre_pm.doctor import DoctorCheck, collect_doctor_checks
 from goinfre_pm.models import InstalledPackage, Package
-from goinfre_pm.storage import StateStore
+from goinfre_pm.storage import Layout, LocalStateStore, StateStore
 
 
 def test_doctor_reports_broken_integrations_with_actions(monkeypatch, tmp_path: Path) -> None:
@@ -19,12 +19,12 @@ def test_doctor_reports_broken_integrations_with_actions(monkeypatch, tmp_path: 
         source_type="tar", architectures=("any",), executable_candidates=("tool",),
     )
     state = StateStore(tmp_path / "state.json")
-    state.set_installed(
+    installations = LocalStateStore(Layout.at(root))
+    installations.set_installed(
         InstalledPackage("tool", "1", package.url, str(root / "apps" / "tool"), [], "now"),
-        install_root=root,
     )
 
-    checks = collect_doctor_checks(root, [package], state)
+    checks = collect_doctor_checks(root, [package], state, installations)
     by_name = {check.name: check for check in checks}
 
     assert by_name["Command PATH"].status == "ok"

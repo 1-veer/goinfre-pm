@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from goinfre_pm.installer import PackageManager
+from goinfre_pm import integration
+from goinfre_pm.installer import OperationLock, PackageManager
 from goinfre_pm.models import InstalledPackage, Package
 from goinfre_pm.storage import Layout, StateStore
 
@@ -24,7 +25,7 @@ def test_disabled_package_cannot_be_installed(tmp_path: Path) -> None:
         next(manager.install("retired"))
 
 
-def test_install_rejects_an_already_installed_package(tmp_path: Path) -> None:
+def test_install_rejects_an_already_installed_package(monkeypatch, tmp_path: Path) -> None:
     package = Package(
         identifier="tool",
         name="Tool",
@@ -33,12 +34,49 @@ def test_install_rejects_an_already_installed_package(tmp_path: Path) -> None:
         url="https://example.invalid/tool.tar.xz",
         source_type="tar",
         architectures=("any",),
+        desktop=False,
     )
     layout = Layout.at(tmp_path / "goinfre-pm")
-    (layout.apps / "tool").mkdir(parents=True)
+    executable = layout.apps / "tool" / "tool"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
     manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+    user_bin = tmp_path / "bin"
+    user_bin.mkdir()
+    (user_bin / "tool").symlink_to(executable)
+    monkeypatch.setattr(integration, "USER_BIN", user_bin)
+    manager.installations.set_installed(
+        InstalledPackage("tool", "1", package.url, str(executable), [str(user_bin / "tool")])
+    )
 
-    with pytest.raises(RuntimeError, match="already installed.*update command"):
+    with pytest.raises(RuntimeError, match="already installed.*update.*reinstall"):
+        next(manager.install("tool"))
+
+
+def test_install_rejects_a_repairable_payload_with_actionable_choices(tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        executable_candidates=("bin/tool",),
+        desktop=False,
+    )
+    executable = tmp_path / "goinfre-pm" / "apps" / "tool" / "bin" / "tool"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    manager = PackageManager(
+        Layout.at(tmp_path / "goinfre-pm"),
+        [package],
+        StateStore(tmp_path / "state.json"),
+    )
+
+    with pytest.raises(RuntimeError, match="needs repair.*repair.*update.*reinstall"):
         next(manager.install("tool"))
 
 
@@ -101,20 +139,20 @@ def test_repair_corrects_wrapped_executable_and_state(monkeypatch, tmp_path: Pat
     helper.chmod(0o755)
 
     state = StateStore(tmp_path / "state.json")
-    state.set_installed(
+    manager = PackageManager(layout, [package], state)
+    manager.installations.set_installed(
         InstalledPackage("zen-browser", "latest", package.url, str(helper), [], "earlier"),
-        install_root=layout.root,
     )
     monkeypatch.setattr("goinfre_pm.integration.USER_BIN", tmp_path / "bin")
     monkeypatch.setattr("goinfre_pm.integration.DESKTOP_DIR", tmp_path / "applications")
     monkeypatch.setattr("goinfre_pm.integration.ICON_DIR", tmp_path / "icons")
 
-    PackageManager(layout, [package], state).repair("zen-browser")
+    manager.repair("zen-browser")
 
-    repaired = state.read()["installed"]["zen-browser"]
+    repaired = manager.installations.read()["installed"]["zen-browser"]
     assert repaired["executable"] == str(browser)
     assert (tmp_path / "bin" / "zen-browser").resolve() == browser.resolve()
-    assert state.read()["desired"] == ["zen-browser"]
+    assert state.read()["setup_packages"] == []
 
 
 def test_first_install_is_cleaned_up_when_integration_fails(monkeypatch, tmp_path: Path) -> None:
@@ -162,7 +200,7 @@ def test_first_install_is_cleaned_up_when_integration_fails(monkeypatch, tmp_pat
 
     assert not (layout.apps / "tool").exists()
     assert not (tmp_path / "bin" / "tool").exists()
-    assert state.read()["installed"] == {}
+    assert manager.installations.read()["installed"] == {}
 
 
 def test_failed_download_does_not_remove_existing_install(monkeypatch, tmp_path: Path) -> None:

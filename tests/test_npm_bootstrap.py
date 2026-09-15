@@ -48,3 +48,5 @@ def test_npm_bootstrap_uses_argument_arrays_and_never_invokes_sudo() -> None:
     assert "sudo apt" not in bootstrap
     assert 'works("curl"' not in bootstrap
     assert 'works("dpkg-deb"' not in bootstrap
+    assert 'finish(run(launcher, args' in bootstrap
+    assert 'args.includes("--no-restore")' not in bootstrap

@@ -1,7 +1,9 @@
 from pathlib import Path
 
-from goinfre_pm import cli
+from goinfre_pm import app as app_module, cli
 from goinfre_pm.errors import error_text, write_crash_log
+from goinfre_pm.models import Package
+from goinfre_pm.storage import StateStore
 
 
 def test_error_text_handles_empty_exception() -> None:
@@ -51,9 +53,73 @@ def test_cli_keeps_install_and_update_as_distinct_operations(monkeypatch) -> Non
             calls.append(("update", identifier))
             return iter(())
 
+        def reinstall(self, identifier, **_kwargs):
+            calls.append(("reinstall", identifier))
+            return iter(())
+
     manager = Manager()
     monkeypatch.setattr(cli, "_manager", lambda: manager)
 
     assert cli.main(["install", "tool"]) == 0
     assert cli.main(["update", "tool"]) == 0
-    assert calls == [("install", "tool"), ("update", "tool")]
+    assert cli.main(["reinstall", "tool"]) == 0
+    assert calls == [("install", "tool"), ("update", "tool"), ("reinstall", "tool")]
+
+
+def test_no_restore_is_forwarded_only_to_interactive_tui(monkeypatch, tmp_path) -> None:
+    calls: list[bool] = []
+    monkeypatch.setattr(cli, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "run_tui", lambda auto_restore=True: calls.append(auto_restore))
+
+    assert cli.main(["--no-restore"]) == 0
+    assert calls == [False]
+    assert cli.main(["version"]) == 0
+    assert calls == [False]
+
+
+def test_restore_cli_aliases_dispatch_and_report_partial_failure(monkeypatch, tmp_path, capsys) -> None:
+    calls: list[str] = []
+
+    class Manager:
+        def restore(self):
+            calls.append("restore")
+            return iter((("failed", ("tool", "offline")),))
+
+    monkeypatch.setattr(cli, "_manager", Manager)
+    monkeypatch.setattr(cli, "StateStore", lambda: StateStore(tmp_path / "state.json"))
+
+    assert cli.main(["restore"]) == 1
+    assert cli.main(["setup", "restore"]) == 1
+    assert calls == ["restore", "restore"]
+    assert capsys.readouterr().err.count("Failed tool: offline") == 2
+
+
+def test_setup_cli_add_remove_enable_disable_are_persistent(monkeypatch, tmp_path, capsys) -> None:
+    state = StateStore(tmp_path / "state.json")
+    tool = Package(
+        "tool",
+        "Tool",
+        "fixture",
+        "Developer Tools",
+        "https://example.invalid/tool.tar.gz",
+        source_type="tar",
+        architectures=("any",),
+    )
+    monkeypatch.setattr(cli, "StateStore", lambda: state)
+    monkeypatch.setattr(cli, "load_packages", lambda: [tool])
+
+    assert cli.main(["setup", "add", "tool", "unknown"]) == 1
+    assert state.read()["setup_packages"] == []
+    assert cli.main(["setup", "add", "tool"]) == 0
+    assert state.read()["setup_packages"] == ["tool"]
+    assert state.read()["setup_enabled"] is True
+    assert cli.main(["setup", "disable"]) == 0
+    assert state.read()["setup_enabled"] is False
+    assert cli.main(["setup", "enable"]) == 0
+    assert state.read()["setup_enabled"] is True
+    assert cli.main(["setup", "remove", "tool"]) == 0
+    assert state.read()["setup_packages"] == []
+    state.set_setup_package("retired-tool", True)
+    assert cli.main(["setup", "remove", "retired-tool"]) == 0
+    assert state.read()["setup_packages"] == []
+    assert "My Setup" in capsys.readouterr().out

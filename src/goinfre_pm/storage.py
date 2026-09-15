@@ -22,15 +22,20 @@ class Layout:
     root: Path
     apps: Path
     downloads: Path
+    runtime: Path
     logs: Path
 
     @classmethod
     def at(cls, root: Path) -> "Layout":
         root = root.expanduser().resolve()
-        return cls(root, root / "apps", root / "downloads", root / "logs")
+        return cls(root, root / "apps", root / "downloads", root / "runtime", root / "logs")
 
     def create(self) -> None:
-        for path in (self.root, self.apps, self.downloads, self.logs):
+        for path in (self.root, self.apps, self.downloads, self.runtime, self.logs):
+            if path.is_symlink():
+                raise RuntimeError(f"Refusing symlinked storage directory: {path}")
+            if path.exists() and not path.is_dir():
+                raise RuntimeError(f"Storage path is not a directory: {path}")
             path.mkdir(parents=True, exist_ok=True)
 
 
@@ -128,6 +133,8 @@ def available_space(root: Path) -> int:
 
 
 class StateStore:
+    """Small roaming preferences stored in the user's persistent home."""
+
     def __init__(self, path: Path = STATE_FILE) -> None:
         self.path = path
         self._lock = threading.RLock()
@@ -138,11 +145,24 @@ class StateStore:
                 data = json.loads(self.path.read_text(encoding="utf-8"))
                 if not isinstance(data, dict):
                     return self.empty()
-                data["schema"] = 2
-                if not isinstance(data.get("desired"), list):
-                    data["desired"] = []
-                if not isinstance(data.get("installed"), dict):
-                    data["installed"] = {}
+                old_schema = data.get("schema", 1)
+                if not isinstance(old_schema, int):
+                    old_schema = 1
+                if old_schema < 3:
+                    legacy = data.get("installed", {})
+                    data["legacy_installed"] = legacy if isinstance(legacy, dict) else {}
+                    data["legacy_desired"] = data.get("desired", []) if isinstance(data.get("desired"), list) else []
+                    data.pop("installed", None)
+                    data.pop("desired", None)
+                    data["setup_enabled"] = False
+                    data["setup_packages"] = []
+                    data["legacy_migration_pending"] = True
+                data["schema"] = 3
+                if not isinstance(data.get("setup_enabled"), bool):
+                    data["setup_enabled"] = False
+                if not isinstance(data.get("setup_packages"), list):
+                    data["setup_packages"] = []
+                data["setup_packages"] = self._valid_identifiers(data["setup_packages"])
                 if not isinstance(data.get("autostart"), bool):
                     data["autostart"] = False
                 if not isinstance(data.get("favorites"), list):
@@ -152,6 +172,12 @@ class StateStore:
                     data["onboarding_complete"] = False
                 if not isinstance(data.get("update_cache"), dict):
                     data["update_cache"] = {}
+                if not isinstance(data.get("legacy_installed"), dict):
+                    data["legacy_installed"] = {}
+                if not isinstance(data.get("legacy_desired"), list):
+                    data["legacy_desired"] = []
+                if not isinstance(data.get("legacy_migration_pending"), bool):
+                    data["legacy_migration_pending"] = False
                 return data
             except (OSError, json.JSONDecodeError):
                 return self.empty()
@@ -159,45 +185,63 @@ class StateStore:
     @staticmethod
     def empty() -> dict[str, Any]:
         return {
-            "schema": 2,
-            "desired": [],
-            "installed": {},
+            "schema": 3,
+            "setup_enabled": False,
+            "setup_packages": [],
             "autostart": False,
             "favorites": [],
             "onboarding_complete": False,
             "update_cache": {},
+            "legacy_installed": {},
+            "legacy_desired": [],
+            "legacy_migration_pending": False,
         }
+
+    @staticmethod
+    def _valid_identifiers(values: list[Any]) -> list[str]:
+        valid: set[str] = set()
+        for item in values:
+            if not isinstance(item, str):
+                continue
+            try:
+                valid.add(validate_package_id(item))
+            except ValueError:
+                continue
+        return sorted(valid)
 
     def write(self, data: dict[str, Any]) -> None:
         with self._lock:
             atomic_json_write(self.path, data)
 
-    def set_installed(self, record: InstalledPackage, desired: bool = True, install_root: Path | None = None) -> None:
+    def set_setup_package(self, identifier: str, selected: bool) -> None:
+        self.set_setup_packages([identifier], selected)
+
+    def set_setup_packages(self, identifiers: list[str], selected: bool) -> None:
+        identifiers = [validate_package_id(identifier) for identifier in identifiers]
         with self._lock:
             data = self.read()
-            if install_root is not None:
-                data["install_root"] = str(install_root.expanduser().resolve())
-            data["installed"][record.identifier] = {
-                "version": record.version,
-                "source": record.source,
-                "executable": record.executable,
-                "launchers": record.launchers,
-                "installed_at": record.installed_at,
-                "download_size": record.download_size,
-                "installed_size": record.installed_size,
-            }
-            if desired and record.identifier not in data["desired"]:
-                data["desired"].append(record.identifier)
-                data["desired"].sort()
+            packages = set(data["setup_packages"])
+            if selected:
+                packages.update(identifiers)
+            else:
+                packages.difference_update(identifiers)
+            data["setup_packages"] = sorted(packages)
+            if selected and identifiers:
+                data["setup_enabled"] = True
             self.write(data)
 
-    def remove(self, identifier: str, keep_desired: bool = False) -> None:
-        validate_package_id(identifier)
+    def set_setup_enabled(self, enabled: bool) -> None:
         with self._lock:
             data = self.read()
-            data["installed"].pop(identifier, None)
-            if not keep_desired:
-                data["desired"] = [item for item in data["desired"] if item != identifier]
+            data["setup_enabled"] = bool(enabled)
+            self.write(data)
+
+    def finish_legacy_migration(self) -> None:
+        with self._lock:
+            data = self.read()
+            data.pop("legacy_installed", None)
+            data.pop("legacy_desired", None)
+            data["legacy_migration_pending"] = False
             self.write(data)
 
     def set_favorite(self, identifier: str, favorite: bool) -> None:
@@ -220,4 +264,62 @@ class StateStore:
         with self._lock:
             data = self.read()
             data["update_cache"][identifier] = value
+            self.write(data)
+
+
+class LocalStateStore:
+    """Installation records that live beside payloads in one goinfre root."""
+
+    def __init__(self, layout: Layout, path: Path | None = None) -> None:
+        self.root = layout.root.expanduser().resolve()
+        self.path = path or layout.runtime / "installed.json"
+        self._lock = threading.RLock()
+
+    def empty(self) -> dict[str, Any]:
+        return {"schema": 1, "install_root": str(self.root), "installed": {}}
+
+    def read(self) -> dict[str, Any]:
+        with self._lock:
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return self.empty()
+            if not isinstance(data, dict) or data.get("install_root") != str(self.root):
+                return self.empty()
+            installed = data.get("installed", {})
+            if not isinstance(installed, dict):
+                installed = {}
+            return {"schema": 1, "install_root": str(self.root), "installed": installed}
+
+    def write(self, data: dict[str, Any]) -> None:
+        with self._lock:
+            normalized = self.empty()
+            installed = data.get("installed", {})
+            normalized["installed"] = installed if isinstance(installed, dict) else {}
+            atomic_json_write(self.path, normalized)
+
+    @staticmethod
+    def _record(record: InstalledPackage) -> dict[str, Any]:
+        return {
+            "version": record.version,
+            "source": record.source,
+            "executable": record.executable,
+            "launchers": record.launchers,
+            "installed_at": record.installed_at,
+            "download_size": record.download_size,
+            "installed_size": record.installed_size,
+        }
+
+    def set_installed(self, record: InstalledPackage) -> None:
+        validate_package_id(record.identifier)
+        with self._lock:
+            data = self.read()
+            data["installed"][record.identifier] = self._record(record)
+            self.write(data)
+
+    def remove(self, identifier: str) -> None:
+        validate_package_id(identifier)
+        with self._lock:
+            data = self.read()
+            data["installed"].pop(identifier, None)
             self.write(data)

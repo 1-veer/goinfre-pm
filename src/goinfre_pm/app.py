@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 import time
 
 from textual import work
@@ -58,6 +59,81 @@ class ConfirmModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class PackageActionModal(ModalScreen[str | None]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(self, package: Package, repairable: bool) -> None:
+        super().__init__()
+        self.package = package
+        self.repairable = repairable
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal action-modal"):
+            yield Label(self.package.name, classes="modal-title")
+            yield Static(
+                "This application already has a payload on this post. Choose an explicit action; "
+                "your profile and cache will remain untouched.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons action-buttons"):
+                yield Button("Update", variant="primary", id="update", disabled=not self.package.enabled or not self.package.compatible)
+                yield Button("Reinstall", id="reinstall", disabled=not self.package.enabled or not self.package.compatible)
+                yield Button("Repair", id="repair", disabled=not self.repairable)
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        next(button for button in self.query(Button) if not button.disabled).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = [button for button in self.query(Button) if not button.disabled]
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None if event.button.id == "cancel" else event.button.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class RemovalChoiceModal(ModalScreen[str | None]):
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(self, count: int) -> None:
+        super().__init__()
+        self.count = count
+
+    def compose(self) -> ComposeResult:
+        noun = "package" if self.count == 1 else "packages"
+        with Vertical(classes="modal removal-modal"):
+            yield Label("Remove My Setup applications?", classes="modal-title")
+            yield Static(
+                f"{self.count} selected {noun} belong to My Setup. Removing them from My Setup prevents "
+                "an unexpected restore next time; profiles and cache still remain.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons action-buttons"):
+                yield Button("Remove + forget", variant="error", id="forget")
+                yield Button("Keep in My Setup", id="keep")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#forget", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None if event.button.id == "cancel" else event.button.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class PathModal(ModalScreen[Path | None]):
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
@@ -104,7 +180,8 @@ class HelpModal(ModalScreen[None]):
             yield Label("Keyboard shortcuts", classes="modal-title")
             yield Static(
                 "↑/↓ or j/k navigate   ←/→ change pane   Space select\n"
-                "i install   I/b review basket   r/R remove   a select visible\n"
+                "i install/actions   I/b basket   r/R remove   a select visible\n"
+                "m toggle My Setup   M add selection   c cancel operation\n"
                 "t Starter Packs   f favorite   s sort   d Doctor\n"
                 "/ search   p path   l logs   w welcome   ? help   q/Esc back"
             )
@@ -134,7 +211,7 @@ class WelcomeModal(ModalScreen[None]):
                 "Launchers and small state → ~/.local and ~/.config\n"
                 "Existing application profiles and settings remain in their normal locations.\n\n"
                 "Use ↑/↓ to browse, → to enter the package list, Space to select, "
-                "t for Starter Packs, and b to review your basket."
+                "m to save an app in My Setup, t for Starter Packs, and b to review your basket."
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Start exploring", variant="primary", id="continue")
@@ -351,12 +428,14 @@ class GoinfrePMApp(App[None]):
         Binding("a", "select_all", "Select all"), Binding("p", "path", "Path"),
         Binding("t", "starter_packs", "Packs"), Binding("b", "basket", "Basket"),
         Binding("f", "favorite", "Favorite"), Binding("s", "sort", "Sort"),
+        Binding("m", "setup_toggle", "My Setup"), Binding("shift+m", "setup_selected", "Save selected", show=False),
+        Binding("c", "cancel_operation", "Cancel", show=False),
         Binding("d", "doctor", "Doctor"), Binding("w", "welcome", "Welcome", show=False),
         Binding("l", "logs", "Logs"), Binding("question_mark", "help", "Help"),
         Binding("enter", "primary", "Details", show=False),
     ]
 
-    def __init__(self) -> None:
+    def __init__(self, auto_restore: bool = True) -> None:
         super().__init__()
         root = resolve_install_root()
         if root is None:
@@ -366,8 +445,11 @@ class GoinfrePMApp(App[None]):
         self.packages = load_packages()
         self.state = StateStore()
         self.manager = PackageManager(self.layout, self.packages, self.state)
+        self.auto_restore = auto_restore
         self.visible_packages = list(self.packages)
         self.busy = False
+        self.cancel_event = threading.Event()
+        self.runtime_status: dict[str, str] = {}
         self.category = "All"
         self.sort_key = "catalog"
         self.update_available: set[str] = set()
@@ -382,12 +464,16 @@ class GoinfrePMApp(App[None]):
         with Horizontal(id="body"):
             with Vertical(id="categories", classes="panel"):
                 categories = list(dict.fromkeys(package.category for package in self.packages))
-                yield OptionList(*(Option(item) for item in ["All", "Favorites", *categories, "Installed"]), id="category-list")
+                yield OptionList(
+                    *(Option(item) for item in ["All", "My Setup", "Needs Restore", "Favorites", *categories, "Installed"]),
+                    id="category-list",
+                )
             with Vertical(id="catalog", classes="panel"):
                 yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="details", classes="panel"):
                 yield Static("Package details", id="details-title")
                 yield Static(id="details-body")
+                yield Button("Add to My Setup", id="setup-toggle-button")
         with Vertical(id="tasks"):
             yield Static("Ready", id="operation")
             yield ProgressBar(total=100, show_eta=False, id="progress")
@@ -420,9 +506,30 @@ class GoinfrePMApp(App[None]):
             splashes[0].remove()
         if not self.state.read().get("onboarding_complete", False):
             self.push_screen(WelcomeModal(self.layout.root), self._onboarding_closed)
+        else:
+            self.set_timer(0.05, self._maybe_auto_restore)
 
     def _onboarding_closed(self, _result: None = None) -> None:
         self.state.set_onboarding_complete()
+        self.set_timer(0.05, self._maybe_auto_restore)
+
+    def _maybe_auto_restore(self) -> None:
+        preferences = self.state.read()
+        if not self.auto_restore or not preferences.get("setup_enabled") or self.busy:
+            return
+        setup = set(preferences.get("setup_packages", []))
+        pending = [
+            package for package in self.packages
+            if package.identifier in setup
+            and package.enabled
+            and package.compatible
+            and not self.manager.installation(package.identifier).healthy
+        ]
+        if not pending:
+            return
+        self.busy = True
+        self.cancel_event = threading.Event()
+        self._restore_worker(pending)
 
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
@@ -448,14 +555,19 @@ class GoinfrePMApp(App[None]):
             self._set_active_pane("catalog")
 
     def _refresh(self, query: str = "", preserve_identifier: str | None = None) -> None:
-        installed = self.manager.state.read().get("installed", {})
+        installed = self.manager.installations.read().get("installed", {})
+        preferences = self.state.read()
+        setup = set(preferences.get("setup_packages", []))
+        conditions = {package.identifier: self.manager.installation(package.identifier) for package in self.packages}
         needle = query.casefold()
-        favorites = set(self.state.read().get("favorites", []))
+        favorites = set(preferences.get("favorites", []))
         filtered = [package for package in self.packages if
-            (package.enabled or package.identifier in installed)
+            (package.enabled or conditions[package.identifier].payload_present or package.identifier in setup)
             and
             (self.category == "All"
-             or (self.category == "Installed" and package.identifier in installed)
+             or (self.category == "Installed" and conditions[package.identifier].payload_present)
+             or (self.category == "My Setup" and package.identifier in setup)
+             or (self.category == "Needs Restore" and package.identifier in setup and conditions[package.identifier].status == "missing")
              or (self.category == "Favorites" and package.identifier in favorites)
              or package.category == self.category)
             and (not needle or needle in f"{package.identifier} {package.name} {package.description}".casefold())]
@@ -465,34 +577,56 @@ class GoinfrePMApp(App[None]):
             if isinstance(record, dict) and isinstance(record.get("installed_size"), int)
         }
         self.visible_packages = (
-            sort_packages(filtered, self.sort_key, set(installed), self.update_available, installed_sizes)
+            sort_packages(
+                filtered,
+                self.sort_key,
+                {identifier for identifier, condition in conditions.items() if condition.payload_present},
+                self.update_available,
+                installed_sizes,
+            )
             if self.sort_key != "catalog"
             else filtered
         )
         table = self.query_one(DataTable)
         table.clear()
         for package in self.visible_packages:
-            favorite_marker = "[yellow]★[/yellow] " if package.identifier in favorites else "  "
+            setup_marker = "[bold #a855f7]◆[/bold #a855f7]" if package.identifier in setup else " "
+            favorite_marker = "[yellow]★[/yellow]" if package.identifier in favorites else " "
             selection_marker = "[bold #c4b5fd]☑[/bold #c4b5fd]" if package.selected else "[dim]☐[/dim]"
-            marker = favorite_marker + selection_marker
-            if package.identifier in installed:
+            marker = f"{setup_marker}{favorite_marker}{selection_marker}"
+            condition = conditions[package.identifier]
+            runtime = self.runtime_status.get(package.identifier)
+            if runtime == "restoring":
+                status = "[bold #c4b5fd]Restoring…[/bold #c4b5fd]"
+            elif runtime == "failed":
+                status = "[red]Restore failed[/red]"
+            elif condition.status == "repairable":
+                status = "[yellow]Repair needed[/yellow]"
+            elif condition.healthy:
                 update = self.update_info.get(package.identifier)
                 if not package.enabled:
-                    status = "[yellow]Installed · unsupported[/yellow]"
+                    status = "[yellow]Installed here · unsupported[/yellow]"
                 elif package.identifier in self.update_available:
                     status = "[yellow]Update available[/yellow]"
                 elif update is None:
-                    status = "Installed · checking" if package.source_type == "github" else "[green]Installed[/green]"
+                    status = "Installed here · checking" if package.source_type == "github" else "[green]Installed here[/green]"
                 elif update.status == "unknown":
                     status = (
-                        "[dim]Installed · check unavailable[/dim]"
+                        "[dim]Installed here · check unavailable[/dim]"
                         if package.source_type == "github"
-                        else "[green]Installed[/green]"
+                        else "[green]Installed here[/green]"
                     )
                 else:
-                    status = "[green]Installed[/green]"
+                    status = "[green]Installed here[/green]"
+            elif package.identifier in setup:
+                if not package.enabled:
+                    status = "[red]Needs restore · unavailable[/red]"
+                elif not package.compatible:
+                    status = "[red]Needs restore · incompatible[/red]"
+                else:
+                    status = "[red]Needs restore[/red]"
             else:
-                status = "[red]Incompatible[/red]" if not package.compatible else "Available"
+                status = "[red]Incompatible[/red]" if not package.compatible else "Not installed"
             table.add_row(marker, package.name, package.category, status, package.source_type, package.version, key=package.identifier)
         if preserve_identifier:
             for row, package in enumerate(self.visible_packages):
@@ -522,9 +656,16 @@ class GoinfrePMApp(App[None]):
 
     def _details(self) -> None:
         package = self._current()
+        setup_button = self.query_one("#setup-toggle-button", Button)
         if package is None:
+            setup_button.label = "Add to My Setup"
+            setup_button.disabled = True
             if self.category == "Favorites":
                 message = "No favorites yet. Highlight a package and press f to keep it here."
+            elif self.category == "My Setup":
+                message = "My Setup is empty. Highlight an app and press m to add it."
+            elif self.category == "Needs Restore":
+                message = "Every My Setup application is available on this post."
             elif self.category == "Installed":
                 message = "Nothing is installed yet. Choose All or a Starter Pack to begin."
             elif self.query_one("#search", Input).value:
@@ -534,16 +675,22 @@ class GoinfrePMApp(App[None]):
             self.query_one("#details-body", Static).update(message)
             return
         live = self.layout.apps / package.identifier
-        state = self.manager.state.read()
+        preferences = self.state.read()
+        setup = set(preferences.get("setup_packages", []))
+        in_setup = package.identifier in setup
+        setup_button.label = "Remove from My Setup" if in_setup else "Add to My Setup"
+        setup_button.disabled = self.busy or (not in_setup and (not package.enabled or not package.compatible))
+        state = self.manager.installations.read()
         record = state.get("installed", {}).get(package.identifier, {})
         record = record if isinstance(record, dict) else {}
-        executable = record.get("executable", "—")
+        condition = self.manager.installation(package.identifier)
+        executable = str(condition.executable) if condition.executable else "—"
         size = record.get("installed_size")
         if not isinstance(size, int):
             size = package.installed_size
         size_text = human_size(size) if isinstance(size, int) else "unknown"
         update = self.update_info.get(package.identifier)
-        if package.identifier not in state.get("installed", {}):
+        if not condition.payload_present:
             update_text = "not installed"
         elif package.source_type != "github":
             update_text = "catalog-managed (automatic upstream check not available)"
@@ -555,12 +702,28 @@ class GoinfrePMApp(App[None]):
             update_text = "current"
         else:
             update_text = f"check unavailable ({update.reason})" if update.reason else "check unavailable"
+        setup_text = "not selected"
+        if package.identifier in setup:
+            setup_text = "automatic restore enabled" if preferences.get("setup_enabled") else "saved; automatic restore paused"
+        status_text = {
+            "installed": "installed here",
+            "repairable": "repair needed",
+            "missing": "needs restore" if package.identifier in setup else "not installed",
+        }[condition.status]
+        if self.runtime_status.get(package.identifier) == "restoring":
+            status_text = "restoring"
+        elif self.runtime_status.get(package.identifier) == "failed":
+            status_text = "restore failed"
         self.query_one("#details-body", Static).update(
             f"[b]{package.name}[/b]\n\n{package.description}\n\n"
             f"Category: {package.category}\nSource: {package.source_type}\nArchitecture: {', '.join(package.architectures)}\n"
             f"Stored: {live}\nExecutable: {executable}\nSize: {size_text}\n"
-            f"Status: {'installed' if live.is_dir() else 'not installed'}\nUpdate: {update_text}\n{package.notes}"
+            f"Status: {status_text}\nMy Setup: {setup_text}\nUpdate: {update_text}\n{package.notes}"
         )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "setup-toggle-button":
+            self.action_setup_toggle()
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         if event.data_table.id == "package-table" and not isinstance(self.screen, ModalScreen):
@@ -638,6 +801,14 @@ class GoinfrePMApp(App[None]):
             return
         self.exit()
 
+    def action_cancel_operation(self) -> None:
+        if not self.busy:
+            self.notify("No operation is active", severity="warning")
+            return
+        self.cancel_event.set()
+        self.query_one("#operation", Static).update("Cancelling after the current safe step…")
+        self.notify("Cancellation requested", severity="warning")
+
     def action_toggle(self) -> None:
         table = self.query_one(DataTable)
         if not table.has_focus:
@@ -679,8 +850,11 @@ class GoinfrePMApp(App[None]):
     def _starter_pack_selected(self, pack: StarterPack | None) -> None:
         if pack is None:
             return
-        installed = set(self.state.read().get("installed", {}))
-        identifiers = tuple(identifier for identifier in apply_starter_pack(pack, self.packages) if identifier not in installed)
+        identifiers = tuple(
+            identifier
+            for identifier in apply_starter_pack(pack, self.packages)
+            if not self.manager.installed(identifier)
+        )
         for package in self.packages:
             if package.identifier in identifiers:
                 package.selected = True
@@ -700,13 +874,16 @@ class GoinfrePMApp(App[None]):
         skipped = len(selected) - len(packages)
         if skipped:
             self.notify(f"Skipped {skipped} already-installed package{'s' if skipped != 1 else ''}", severity="warning")
-        installed = self.state.read().get("installed", {})
+        installed = self.manager.installations.read().get("installed", {})
         try:
             free_space = available_space(self.layout.root)
         except OSError:
             self.notify("The install root is unavailable; run Doctor or choose another path", severity="error")
             return
-        self.push_screen(BasketModal(packages, free_space, installed), lambda install: self._run_packages(packages, False) if install else None)
+        self.push_screen(
+            BasketModal(packages, free_space, installed),
+            lambda install: self._run_packages(packages, "install") if install else None,
+        )
 
     def action_favorite(self) -> None:
         package = self._current()
@@ -717,6 +894,36 @@ class GoinfrePMApp(App[None]):
         self.state.set_favorite(package.identifier, favorite)
         self._refresh(self.query_one("#search", Input).value, package.identifier)
         self.notify(f"{package.name}: {'added to' if favorite else 'removed from'} favorites")
+
+    def action_setup_toggle(self) -> None:
+        package = self._current()
+        if package is None or self.busy:
+            return
+        setup = set(self.state.read().get("setup_packages", []))
+        selected = package.identifier not in setup
+        if selected and (not package.enabled or not package.compatible):
+            self.notify(f"{package.name} cannot be added because it is unavailable or incompatible", severity="error")
+            return
+        self.state.set_setup_package(package.identifier, selected)
+        if not selected:
+            self.runtime_status.pop(package.identifier, None)
+        self._refresh(self.query_one("#search", Input).value, package.identifier)
+        self.notify(f"{package.name}: {'added to' if selected else 'removed from'} My Setup")
+
+    def action_setup_selected(self) -> None:
+        if self.busy:
+            return
+        packages = [
+            package for package in self.packages
+            if package.selected and package.enabled and package.compatible
+        ]
+        if not packages:
+            self.notify("Select compatible packages first", severity="warning")
+            return
+        self.state.set_setup_packages([package.identifier for package in packages], True)
+        current = self._current()
+        self._refresh(preserve_identifier=current.identifier if current else None)
+        self.notify(f"Added {len(packages)} package{'s' if len(packages) != 1 else ''} to My Setup")
 
     def action_sort(self) -> None:
         if not self.busy:
@@ -730,11 +937,13 @@ class GoinfrePMApp(App[None]):
 
     def action_doctor(self) -> None:
         if not self.busy:
-            self.push_screen(DoctorModal(collect_doctor_checks(self.layout.root, self.packages, self.state)))
+            self.push_screen(
+                DoctorModal(collect_doctor_checks(self.layout.root, self.packages, self.state, self.manager.installations))
+            )
 
     @work(thread=True, exclusive=True, group="update-checks")
     def _check_updates(self) -> None:
-        installed = self.state.read().get("installed", {})
+        installed = self.manager.installations.read().get("installed", {})
         if not isinstance(installed, dict):
             return
         found: set[str] = set()
@@ -770,12 +979,17 @@ class GoinfrePMApp(App[None]):
     def action_install_one(self) -> None:
         package = self._current()
         if package and self.manager.installed(package.identifier):
-            self.notify(
-                f"{package.name} is already installed; use `gpm update {package.identifier}` to update it",
-                severity="warning",
+            condition = self.manager.installation(package.identifier)
+            self.push_screen(
+                PackageActionModal(package, condition.status == "repairable"),
+                lambda action: self._installed_action(package, action),
             )
         elif package:
-            self._run_packages([package], remove=False)
+            self._run_packages([package], "install")
+
+    def _installed_action(self, package: Package, action: str | None) -> None:
+        if action in {"update", "reinstall", "repair"}:
+            self._run_packages([package], action)
 
     def action_install_selected(self) -> None:
         self.action_basket()
@@ -783,15 +997,43 @@ class GoinfrePMApp(App[None]):
     def action_remove_one(self) -> None:
         package = self._current()
         if package and not self.busy:
-            self.push_screen(ConfirmModal("Remove application?", f"Remove {package.name} application files and integrations? User configuration will remain."), lambda ok: self._run_packages([package], True) if ok else None)
+            if package.identifier in set(self.state.read().get("setup_packages", [])):
+                self.push_screen(
+                    RemovalChoiceModal(1),
+                    lambda choice: self._remove_choice([package], choice),
+                )
+            else:
+                self.push_screen(
+                    ConfirmModal(
+                        "Remove application?",
+                        f"Remove {package.name} application files and integrations? User configuration will remain.",
+                    ),
+                    lambda ok: self._run_packages([package], "remove") if ok else None,
+                )
 
     def action_remove_selected(self) -> None:
-        packages = [package for package in self.packages if package.selected]
+        packages = [package for package in self.packages if package.selected and self.manager.installed(package.identifier)]
         if packages and not self.busy:
-            self.push_screen(ConfirmModal("Remove selected applications?", f"Remove {len(packages)} selected applications? User configuration will remain."), lambda ok: self._run_packages(packages, True) if ok else None)
+            setup = set(self.state.read().get("setup_packages", []))
+            if any(package.identifier in setup for package in packages):
+                self.push_screen(RemovalChoiceModal(len(packages)), lambda choice: self._remove_choice(packages, choice))
+            else:
+                self.push_screen(
+                    ConfirmModal(
+                        "Remove selected applications?",
+                        f"Remove {len(packages)} selected applications? User configuration will remain.",
+                    ),
+                    lambda ok: self._run_packages(packages, "remove") if ok else None,
+                )
+        elif not self.busy:
+            self.notify("No installed packages selected", severity="warning")
 
-    def _run_packages(self, packages: list[Package], remove: bool) -> None:
-        if not remove:
+    def _remove_choice(self, packages: list[Package], choice: str | None) -> None:
+        if choice in {"forget", "keep"}:
+            self._run_packages(packages, "remove", keep_setup=choice == "keep")
+
+    def _run_packages(self, packages: list[Package], operation: str, keep_setup: bool = False) -> None:
+        if operation == "install":
             packages = [package for package in packages if not self.manager.installed(package.identifier)]
         if self.busy:
             self.notify("Another operation is active", severity="warning")
@@ -799,33 +1041,49 @@ class GoinfrePMApp(App[None]):
             self.notify("No packages selected", severity="warning")
         else:
             self.busy = True
-            self._worker(packages, remove)
+            self.cancel_event = threading.Event()
+            self._worker(packages, operation, keep_setup)
 
     @work(thread=True, exclusive=True)
-    def _worker(self, packages: list[Package], remove: bool) -> None:
+    def _worker(self, packages: list[Package], operation: str, keep_setup: bool = False) -> None:
         started = time.monotonic()
         succeeded: list[Package] = []
         failed: list[tuple[Package, str]] = []
+        skipped: list[tuple[Package, str]] = []
+        verbs = {"install": "Installing", "update": "Updating", "reinstall": "Reinstalling", "repair": "Repairing", "remove": "Removing"}
         try:
             for package in packages:
+                if self.cancel_event.is_set():
+                    skipped.append((package, "cancelled"))
+                    continue
                 try:
                     self.call_from_thread(self.query_one(ProgressBar).update, progress=0)
-                    self.call_from_thread(self.query_one("#operation", Static).update, f"{'Removing' if remove else 'Installing'} {package.name}")
-                    events = self.manager.remove(package.identifier) if remove else self.manager.install(
-                        package.identifier,
-                        progress_callback=lambda value: self.call_from_thread(
-                            self.query_one(ProgressBar).update, progress=value
-                        ),
-                        transfer_callback=lambda done, total, speed, eta, item=package: self.call_from_thread(
-                            self._show_transfer, item, done, total, speed, eta
-                        ),
-                    )
+                    self.call_from_thread(self.query_one("#operation", Static).update, f"{verbs[operation]} {package.name}")
+                    if operation == "remove":
+                        events = self.manager.remove(package.identifier, keep_setup=keep_setup)
+                    elif operation == "repair":
+                        self.manager.repair(package.identifier)
+                        events = iter((("log", f"Repaired {package.name}"),))
+                    else:
+                        method = {"install": self.manager.install, "update": self.manager.update, "reinstall": self.manager.reinstall}[operation]
+                        events = method(
+                            package.identifier,
+                            cancel=self.cancel_event,
+                            progress_callback=lambda value: self.call_from_thread(
+                                self.query_one(ProgressBar).update, progress=value
+                            ),
+                            transfer_callback=lambda done, total, speed, eta, item=package: self.call_from_thread(
+                                self._show_transfer, item, done, total, speed, eta
+                            ),
+                        )
                     for kind, value in events:
                         if kind == "log":
                             self.call_from_thread(self.query_one(RichLog).write, str(value))
                         elif kind == "progress":
                             self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
-                    self.call_from_thread(self.notify, f"{package.name}: {'removed' if remove else 'installed'}")
+                    completed = {"install": "installed", "update": "updated", "reinstall": "reinstalled", "repair": "repaired", "remove": "removed"}[operation]
+                    self.call_from_thread(self.notify, f"{package.name}: {completed}")
+                    self.runtime_status.pop(package.identifier, None)
                     succeeded.append(package)
                 except Exception as exc:
                     message = error_text(exc)
@@ -837,7 +1095,81 @@ class GoinfrePMApp(App[None]):
             self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
             self.call_from_thread(self._refresh)
             elapsed = time.monotonic() - started
-            self.call_from_thread(self._show_summary, succeeded, failed, remove, elapsed)
+            self.call_from_thread(self._show_summary, succeeded, failed, operation, elapsed, skipped)
+
+    @work(thread=True, exclusive=True)
+    def _restore_worker(self, packages: list[Package]) -> None:
+        started = time.monotonic()
+        by_identifier = {package.identifier: package for package in packages}
+        succeeded: list[Package] = []
+        failed: list[tuple[Package, str]] = []
+        skipped: list[tuple[Package, str]] = []
+        current: list[Package | None] = [None]
+        try:
+            events = self.manager.restore(
+                self.cancel_event,
+                list(by_identifier),
+                progress_callback=lambda value: self.call_from_thread(
+                    self.query_one(ProgressBar).update, progress=value
+                ),
+                transfer_callback=lambda done, total, speed, eta: self.call_from_thread(
+                    self._show_transfer, current[0], done, total, speed, eta
+                ) if current[0] is not None else None,
+            )
+            for kind, value in events:
+                if kind == "package":
+                    identifier, index, total = value  # type: ignore[misc]
+                    package = by_identifier.get(str(identifier))
+                    if package:
+                        current[0] = package
+                        self.runtime_status[package.identifier] = "restoring"
+                        self.call_from_thread(
+                            self.query_one("#operation", Static).update,
+                            f"Restoring My Setup — package {index} of {total}: {package.name}",
+                        )
+                        self.call_from_thread(self.query_one(ProgressBar).update, progress=0)
+                        self.call_from_thread(self._refresh, preserve_identifier=package.identifier)
+                elif kind == "log":
+                    self.call_from_thread(self.query_one(RichLog).write, str(value))
+                elif kind == "progress":
+                    self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
+                elif kind == "restored":
+                    package = by_identifier.get(str(value))
+                    if package:
+                        self.runtime_status.pop(package.identifier, None)
+                        succeeded.append(package)
+                elif kind in {"failed", "skipped"}:
+                    identifier, reason = value  # type: ignore[misc]
+                    package = by_identifier.get(str(identifier))
+                    if package:
+                        if kind == "failed":
+                            self.runtime_status[package.identifier] = "failed"
+                            failed.append((package, str(reason)))
+                            self.call_from_thread(
+                                self.query_one(RichLog).write,
+                                f"[red]{package.name}: {reason}[/red]",
+                            )
+                        else:
+                            self.runtime_status.pop(package.identifier, None)
+                            skipped.append((package, str(reason)))
+                elif kind == "cancelled":
+                    package = by_identifier.get(str(value))
+                    if package:
+                        self.runtime_status.pop(package.identifier, None)
+                        skipped.append((package, "cancelled"))
+        except Exception as exc:
+            message = error_text(exc)
+            for package in packages:
+                if package not in succeeded and not any(item == package for item, _reason in failed):
+                    self.runtime_status[package.identifier] = "failed"
+                    failed.append((package, message))
+            self.call_from_thread(self.query_one(RichLog).write, f"[red]My Setup restore: {message}[/red]")
+        finally:
+            self.busy = False
+            self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
+            self.call_from_thread(self._refresh)
+            elapsed = time.monotonic() - started
+            self.call_from_thread(self._show_summary, succeeded, failed, "restore", elapsed, skipped)
 
     def _show_transfer(self, package: Package, done: int, total: int | None, speed: float, eta: float | None) -> None:
         amount = human_size(done)
@@ -851,22 +1183,34 @@ class GoinfrePMApp(App[None]):
         self,
         succeeded: list[Package],
         failed: list[tuple[Package, str]],
-        remove: bool,
+        operation: str,
         elapsed: float,
+        skipped: list[tuple[Package, str]] | None = None,
     ) -> None:
+        skipped = skipped or []
         for package in succeeded:
             package.selected = False
-        action = "Removed" if remove else "Installed"
+        action = {
+            "install": "Installed",
+            "update": "Updated",
+            "reinstall": "Reinstalled",
+            "repair": "Repaired",
+            "remove": "Removed",
+            "restore": "Restored",
+        }[operation]
         lines = [
-            f"{action}: {len(succeeded)}   Failed: {len(failed)}   Time: {elapsed:.1f}s",
+            f"{action}: {len(succeeded)}   Failed: {len(failed)}   Skipped: {len(skipped)}   Time: {elapsed:.1f}s",
             f"Location: {self.layout.apps}",
         ]
         if succeeded:
             lines.extend(("", "Completed:", *(f"  • {package.name}" for package in succeeded)))
         if failed:
             lines.extend(("", "Needs attention:", *(f"  • {package.name}: {message}" for package, message in failed)))
+        if skipped:
+            lines.extend(("", "Skipped:", *(f"  • {package.name}: {message}" for package, message in skipped)))
         self._refresh()
-        self.push_screen(SummaryModal("Operation complete", "\n".join(lines)))
+        title = "My Setup restore complete" if operation == "restore" else "Operation complete"
+        self.push_screen(SummaryModal(title, "\n".join(lines)))
 
     def _handle_exception(self, error: Exception) -> None:
         """Replace Textual's terminal traceback with a concise recoverable report."""
@@ -879,5 +1223,5 @@ class GoinfrePMApp(App[None]):
         self.panic(f"{DISPLAY_NAME} encountered an unexpected error: {error_text(error)}.{suffix}")
 
 
-def run_tui() -> None:
-    GoinfrePMApp().run()
+def run_tui(auto_restore: bool = True) -> None:
+    GoinfrePMApp(auto_restore=auto_restore).run()
