@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import tempfile
 import threading
 import time
@@ -17,7 +18,7 @@ from . import integration as integration_module
 from .downloader import DownloadCancelled, download
 from .extractor import extract_download
 from .integration import find_executable, integrate, remove_integration, validate_user_data_path
-from .models import InstalledPackage, Package
+from .models import InstalledPackage, Package, validate_package_id
 from .storage import Layout, LocalStateStore, StateStore, available_space, verify_install_root
 
 Event = tuple[str, object]
@@ -36,6 +37,88 @@ class InstallationCheck:
     @property
     def healthy(self) -> bool:
         return self.status == "installed"
+
+
+@dataclass(frozen=True)
+class CleanupItem:
+    path: Path
+    kind: str
+    size: int
+
+
+@dataclass(frozen=True)
+class CleanupReport:
+    items: tuple[CleanupItem, ...]
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(item.size for item in self.items)
+
+    @property
+    def count(self) -> int:
+        return len(self.items)
+
+
+def _cleanup_entry_size(path: Path) -> int:
+    try:
+        if path.is_symlink():
+            return path.lstat().st_size
+        if path.is_dir():
+            return directory_size(path)
+        return path.stat().st_size if path.is_file() else 0
+    except OSError:
+        return 0
+
+
+def _is_stale_app_workdir(name: str) -> bool:
+    if not name.startswith("."):
+        return False
+    for marker in (".stage-", ".backup-"):
+        if marker not in name:
+            continue
+        identifier, token = name[1:].rsplit(marker, 1)
+        try:
+            validate_package_id(identifier)
+        except ValueError:
+            return False
+        return len(token) == 32 and all(character in "0123456789abcdef" for character in token)
+    return False
+
+
+def cleanup_report(layout: Layout, now: float | None = None, log_retention_days: int = 30) -> CleanupReport:
+    """Find only disposable files in manager-owned storage directories."""
+    now = time.time() if now is None else now
+    cutoff = now - log_retention_days * 24 * 60 * 60
+    items: list[CleanupItem] = []
+    if layout.downloads.is_dir():
+        for path in layout.downloads.iterdir():
+            items.append(CleanupItem(path, "temporary download", _cleanup_entry_size(path)))
+    if layout.apps.is_dir():
+        for path in layout.apps.iterdir():
+            if _is_stale_app_workdir(path.name):
+                items.append(CleanupItem(path, "stale installation workdir", _cleanup_entry_size(path)))
+    if layout.logs.is_dir():
+        for path in layout.logs.iterdir():
+            try:
+                validate_package_id(path.stem)
+                old_enough = path.suffix == ".log" and path.lstat().st_mtime < cutoff
+            except (OSError, ValueError):
+                old_enough = False
+            if old_enough:
+                items.append(CleanupItem(path, "old log", _cleanup_entry_size(path)))
+    return CleanupReport(tuple(sorted(items, key=lambda item: str(item.path))))
+
+
+def _validate_cleanup_item(layout: Layout, item: CleanupItem) -> None:
+    approved = (
+        item.kind == "temporary download" and item.path.parent == layout.downloads
+        or item.kind == "stale installation workdir"
+        and item.path.parent == layout.apps
+        and _is_stale_app_workdir(item.path.name)
+        or item.kind == "old log" and item.path.parent == layout.logs and item.path.suffix == ".log"
+    )
+    if not approved or item.path.name in {"", ".", ".."}:
+        raise RuntimeError(f"Refusing unsafe cleanup target: {item.path}")
 
 
 class OperationLock:
@@ -159,6 +242,40 @@ class PackageManager:
 
     def installed(self, identifier: str) -> bool:
         return self.installation(identifier).payload_present
+
+    def launch(self, identifier: str) -> int:
+        package = self.package(identifier)
+        condition = self.installation(identifier)
+        executable = condition.executable
+        live = self.layout.apps / identifier
+        if executable is None or not self._valid_executable(live, executable):
+            raise RuntimeError(f"{package.name} cannot be launched because its executable is missing; reinstall it")
+        process = subprocess.Popen(
+            [str(executable)],
+            cwd=str(executable.parent),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+        return process.pid
+
+    def cleanup_report(self) -> CleanupReport:
+        return cleanup_report(self.layout)
+
+    def cleanup(self) -> CleanupReport:
+        """Remove a freshly revalidated set of safe temporary files."""
+        with OperationLock(self.layout):
+            report = cleanup_report(self.layout)
+            for item in report.items:
+                path = item.path
+                _validate_cleanup_item(self.layout, item)
+                if path.is_symlink() or path.is_file():
+                    path.unlink(missing_ok=True)
+                elif path.is_dir():
+                    shutil.rmtree(path)
+            return report
 
     def package_status(self, identifier: str) -> str:
         condition = self.installation(identifier)

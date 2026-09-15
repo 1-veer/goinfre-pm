@@ -72,10 +72,11 @@ class ConfirmModal(ModalScreen[bool]):
 class PackageActionModal(ModalScreen[str | None]):
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
-    def __init__(self, package: Package, repairable: bool) -> None:
+    def __init__(self, package: Package, repairable: bool, launchable: bool = True) -> None:
         super().__init__()
         self.package = package
         self.repairable = repairable
+        self.launchable = launchable
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal action-modal"):
@@ -86,7 +87,14 @@ class PackageActionModal(ModalScreen[str | None]):
                 classes="modal-copy",
             )
             with Horizontal(classes="modal-buttons action-buttons"):
-                yield Button("Update", variant="primary", id="update", disabled=not self.package.enabled or not self.package.compatible)
+                if self.launchable:
+                    yield Button("Launch", variant="primary", id="launch")
+                yield Button(
+                    "Update",
+                    variant="default" if self.launchable else "primary",
+                    id="update",
+                    disabled=not self.package.enabled or not self.package.compatible,
+                )
                 yield Button("Reinstall", id="reinstall", disabled=not self.package.enabled or not self.package.compatible)
                 yield Button("Repair", id="repair", disabled=not self.repairable)
                 yield Button("Cancel", id="cancel")
@@ -190,7 +198,8 @@ class HelpModal(ModalScreen[None]):
             yield Label("Keyboard shortcuts", classes="modal-title")
             yield Static(
                 "↑/↓ or j/k navigate   ←/→ change pane   Space select\n"
-                "i install/actions   I/b basket   r/R remove   a select visible\n"
+                "Enter open/launch   i install/actions   I/b basket   r/R remove\n"
+                "a select visible\n"
                 "m toggle Auto Setup   M add selection   c cancel operation\n"
                 "t Starter Packs   f favorite   s sort   d Doctor\n"
                 "/ search   p path   ^P themes   l logs   w welcome   ? help   q/Esc back"
@@ -430,12 +439,14 @@ class SummaryModal(ModalScreen[None]):
         self.dismiss(None)
 
 
-class DoctorModal(ModalScreen[None]):
+class DoctorModal(ModalScreen[str | None]):
     BINDINGS = [Binding("escape", "close", "Close", show=False)]
 
-    def __init__(self, checks: list[DoctorCheck]) -> None:
+    def __init__(self, checks: list[DoctorCheck], cleanup_bytes: int = 0, cleanup_count: int = 0) -> None:
         super().__init__()
         self.checks = checks
+        self.cleanup_bytes = cleanup_bytes
+        self.cleanup_count = cleanup_count
 
     def compose(self) -> ComposeResult:
         passed = sum(check.status == "ok" for check in self.checks)
@@ -446,7 +457,9 @@ class DoctorModal(ModalScreen[None]):
             yield DataTable(id="doctor-table", cursor_type="row", zebra_stripes=True)
             yield Static("Highlight a check to see the recommended action.", id="doctor-action")
             with Horizontal(classes="modal-buttons"):
-                yield Button("Close", variant="primary", id="close")
+                if self.cleanup_count:
+                    yield Button(f"Clean {human_size(self.cleanup_bytes)}", variant="primary", id="clean")
+                yield Button("Close", variant="primary" if not self.cleanup_count else "default", id="close")
 
     def on_mount(self) -> None:
         table = self.query_one("#doctor-table", DataTable)
@@ -466,8 +479,14 @@ class DoctorModal(ModalScreen[None]):
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._show_action(event.cursor_row)
 
-    def on_button_pressed(self, _event: Button.Pressed) -> None:
-        self.dismiss(None)
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else (-1 if delta > 0 else 0)
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss("clean" if event.button.id == "clean" else None)
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -491,7 +510,7 @@ class GoinfrePMApp(App[None]):
         Binding("c", "cancel_operation", "Cancel", show=False),
         Binding("d", "doctor", "Doctor"), Binding("w", "welcome", "Welcome", show=False),
         Binding("l", "logs", "Logs"), Binding("question_mark", "help", "Help"),
-        Binding("enter", "primary", "Details", show=False),
+        Binding("enter", "primary", "Open", show=False),
     ]
 
     def __init__(self, auto_restore: bool = True) -> None:
@@ -829,6 +848,10 @@ class GoinfrePMApp(App[None]):
         if event.data_table.id == "package-table" and not isinstance(self.screen, ModalScreen):
             self._details()
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id == "package-table" and not isinstance(self.screen, ModalScreen):
+            self.action_primary()
+
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_list.id == "category-list" and not isinstance(self.screen, ModalScreen):
             self.category = str(event.option.prompt)
@@ -1037,9 +1060,40 @@ class GoinfrePMApp(App[None]):
 
     def action_doctor(self) -> None:
         if not self.busy:
+            cleanup = self.manager.cleanup_report()
             self.push_screen(
-                DoctorModal(collect_doctor_checks(self.layout.root, self.packages, self.state, self.manager.installations))
+                DoctorModal(
+                    collect_doctor_checks(self.layout.root, self.packages, self.state, self.manager.installations),
+                    cleanup.total_bytes,
+                    cleanup.count,
+                ),
+                self._doctor_closed,
             )
+
+    def _doctor_closed(self, action: str | None) -> None:
+        if action == "clean" and not self.busy:
+            self.busy = True
+            self.query_one("#operation", Static).update("Cleaning temporary GoinfrePM files…")
+            self._cleanup_worker()
+
+    @work(thread=True, exclusive=True, group="cleanup")
+    def _cleanup_worker(self) -> None:
+        try:
+            report = self.manager.cleanup()
+            size = human_size(report.total_bytes)
+            self.call_from_thread(
+                self.query_one(RichLog).write,
+                f"Cleaned {report.count} temporary item{'s' if report.count != 1 else ''} ({size}).",
+            )
+            self.call_from_thread(self.notify, f"Reclaimed {size}")
+        except Exception as exc:
+            message = error_text(exc)
+            self.call_from_thread(self.query_one(RichLog).write, f"[red]Cleanup failed: {message}[/red]")
+            self.call_from_thread(self.notify, f"Cleanup failed: {message}", severity="error")
+        finally:
+            self.busy = False
+            self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
+            self.call_from_thread(self._refresh)
 
     @work(thread=True, exclusive=True, group="update-checks")
     def _check_updates(self) -> None:
@@ -1061,7 +1115,11 @@ class GoinfrePMApp(App[None]):
         self.call_from_thread(self._refresh)
 
     def action_primary(self) -> None:
-        self._details()
+        package = self._current()
+        if self.query_one(DataTable).has_focus and package and self.manager.installed(package.identifier) and not self.busy:
+            self._open_installed_actions(package)
+        else:
+            self._details()
 
     def action_path(self) -> None:
         if not self.busy:
@@ -1079,16 +1137,32 @@ class GoinfrePMApp(App[None]):
     def action_install_one(self) -> None:
         package = self._current()
         if package and self.manager.installed(package.identifier):
-            condition = self.manager.installation(package.identifier)
-            self.push_screen(
-                PackageActionModal(package, condition.status == "repairable"),
-                lambda action: self._installed_action(package, action),
-            )
+            self._open_installed_actions(package)
         elif package:
             self._run_packages([package], "install")
 
+    def _open_installed_actions(self, package: Package) -> None:
+        condition = self.manager.installation(package.identifier)
+        self.push_screen(
+            PackageActionModal(
+                package,
+                condition.status == "repairable",
+                package.desktop and condition.executable is not None,
+            ),
+            lambda action: self._installed_action(package, action),
+        )
+
     def _installed_action(self, package: Package, action: str | None) -> None:
-        if action in {"update", "reinstall", "repair"}:
+        if action == "launch":
+            try:
+                self.manager.launch(package.identifier)
+                self.query_one(RichLog).write(f"Launched {package.name}.")
+                self.notify(f"Launched {package.name}")
+            except Exception as exc:
+                message = error_text(exc)
+                self.query_one(RichLog).write(f"[red]Could not launch {package.name}: {message}[/red]")
+                self.notify(f"Could not launch {package.name}: {message}", severity="error")
+        elif action in {"update", "reinstall", "repair"}:
             self._run_packages([package], action)
 
     def action_install_selected(self) -> None:
