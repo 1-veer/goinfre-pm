@@ -55,7 +55,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .summary-modal { width: 72; max-height: 90%; overflow-y: auto; }
 .action-modal { width: 76; }
 .removal-modal { width: 76; }
-.action-buttons { height: 5; }
+.action-buttons { height: 7; margin-top: 1; }
+.action-button-row { height: 3; align: center middle; }
+.action-button-row Button { width: 1fr; margin: 0 1; }
 .doctor-modal { width: 78; height: 90%; max-height: 28; }
 .doctor-modal DataTable { height: 1fr; background: $gpm-panel; }
 #doctor-action { height: 3; color: $gpm-amber; padding: 1; }

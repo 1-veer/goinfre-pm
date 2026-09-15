@@ -566,6 +566,10 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             action = narrow.screen.query_one(".action-modal")
             assert action.region.height <= 24
             assert action.region.width <= 80
+            buttons = list(action.query(Button))
+            assert all(button.region.x >= action.region.x for button in buttons)
+            assert all(button.region.right <= action.region.right for button in buttons)
+            assert len({button.region.y for button in buttons}) == 2
             await pilot.press("escape")
             narrow.push_screen(app_module.RemovalChoiceModal(1))
             await pilot.pause()
