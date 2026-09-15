@@ -8,7 +8,7 @@ import time
 from textual import work
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import DescendantFocus, Resize
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, DataTable, Footer, Input, Label, OptionList, ProgressBar, RichLog, Static
@@ -120,7 +120,7 @@ class RemovalChoiceModal(ModalScreen[str | None]):
             yield Label("Remove Auto Setup applications?", classes="modal-title")
             yield Static(
                 f"{self.count} selected {noun} belong to Auto Setup. Removing them from Auto Setup prevents "
-                "an unexpected restore next time; profiles and cache still remain.",
+                "them being offered for installation next time; profiles and cache still remain.",
                 classes="modal-copy",
             )
             with Horizontal(classes="modal-buttons action-buttons"):
@@ -222,7 +222,7 @@ class WelcomeModal(ModalScreen[None]):
                 "Existing application profiles and settings remain in their normal locations.\n\n"
                 "Use ↑/↓ to browse, → to enter the package list, Space to select, "
                 "m to save an app in Auto Setup, ^P to choose a theme, t for Starter Packs, "
-                "and b to review your basket.\n\nCreated by veer 🐧"
+                "and b to review your basket.\n\nMade by VEER"
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Start exploring", variant="primary", id="continue")
@@ -232,6 +232,54 @@ class WelcomeModal(ModalScreen[None]):
 
     def action_close(self) -> None:
         self.dismiss(None)
+
+
+class AutoSetupPromptModal(ModalScreen[bool]):
+    """Ask before preparing missing Auto Setup applications on this post."""
+
+    BINDINGS = [Binding("escape", "cancel", "Not now", show=False)]
+
+    def __init__(self, packages: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.packages = packages
+
+    def compose(self) -> ComposeResult:
+        count = len(self.packages)
+        noun = "app" if count == 1 else "apps"
+        with Vertical(classes="modal auto-setup-prompt-modal"):
+            yield Label("Set up this post?", classes="modal-title")
+            yield Static(
+                f"GoinfrePM found {count} {noun} from your Auto Setup that "
+                f"{'is' if count == 1 else 'are'} not ready on this post:",
+                classes="modal-copy",
+            )
+            with VerticalScroll(id="auto-setup-prompt-list"):
+                yield Static(
+                    "\n".join(f"• {name} — {reason}" for name, reason in self.packages),
+                    id="auto-setup-prompt-items",
+                )
+            yield Static(
+                "Install or repair them now? Choose Not now to continue without changing anything.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Install now", variant="primary", id="install")
+                yield Button("Not now", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#install", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "install")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
 
 
 class StarterPacksModal(ModalScreen[StarterPack | None]):
@@ -477,10 +525,10 @@ class GoinfrePMApp(App[None]):
             with Vertical(id="categories", classes="panel"):
                 categories = list(dict.fromkeys(package.category for package in self.packages))
                 yield OptionList(
-                    *(Option(item) for item in ["All", "Auto Setup", "Missing Here", "Favorites", *categories, "Installed"]),
+                    *(Option(item) for item in ["All", "Auto Setup", "Favorites", *categories, "Installed"]),
                     id="category-list",
                 )
-                yield Static("Created by veer 🐧", id="creator")
+                yield Static("Made by VEER", id="creator")
             with Vertical(id="catalog", classes="panel"):
                 yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="details", classes="panel"):
@@ -563,6 +611,25 @@ class GoinfrePMApp(App[None]):
         ]
         if not pending:
             return
+        prompt_items = [
+            (
+                package.name,
+                "needs launcher repair"
+                if self.manager.installation(package.identifier).status == "repairable"
+                else "not installed",
+            )
+            for package in pending
+        ]
+        self.push_screen(
+            AutoSetupPromptModal(prompt_items),
+            lambda accepted: self._auto_setup_choice(pending, accepted),
+        )
+
+    def _auto_setup_choice(self, pending: list[Package], accepted: bool) -> None:
+        if not accepted:
+            self.query_one("#operation", Static).update("Auto Setup skipped for this launch")
+            self.query_one(RichLog).write("Auto Setup was not installed; no application files were changed.")
+            return
         self.busy = True
         self.cancel_event = threading.Event()
         self._restore_worker(pending)
@@ -603,7 +670,6 @@ class GoinfrePMApp(App[None]):
             (self.category == "All"
              or (self.category == "Installed" and conditions[package.identifier].payload_present)
              or (self.category == "Auto Setup" and package.identifier in setup)
-             or (self.category == "Missing Here" and package.identifier in setup and conditions[package.identifier].status == "missing")
              or (self.category == "Favorites" and package.identifier in favorites)
              or package.category == self.category)
             and (not needle or needle in f"{package.identifier} {package.name} {package.description}".casefold())]
@@ -656,11 +722,11 @@ class GoinfrePMApp(App[None]):
                     status = "[green]Installed here[/green]"
             elif package.identifier in setup:
                 if not package.enabled:
-                    status = "[red]Missing here · unavailable[/red]"
+                    status = "[red]Not installed here · unavailable[/red]"
                 elif not package.compatible:
-                    status = "[red]Missing here · incompatible[/red]"
+                    status = "[red]Not installed here · incompatible[/red]"
                 else:
-                    status = "[red]Missing here[/red]"
+                    status = "[red]Not installed here[/red]"
             else:
                 status = "[red]Incompatible[/red]" if not package.compatible else "Not installed"
             table.add_row(marker, package.name, package.category, status, package.source_type, package.version, key=package.identifier)
@@ -700,8 +766,6 @@ class GoinfrePMApp(App[None]):
                 message = "No favorites yet. Highlight a package and press f to keep it here."
             elif self.category == "Auto Setup":
                 message = "Auto Setup is empty. Add apps here to install them automatically after changing posts."
-            elif self.category == "Missing Here":
-                message = "Every Auto Setup application is available on this post."
             elif self.category == "Installed":
                 message = "Nothing is installed yet. Choose All or a Starter Pack to begin."
             elif self.query_one("#search", Input).value:
@@ -740,11 +804,11 @@ class GoinfrePMApp(App[None]):
             update_text = f"check unavailable ({update.reason})" if update.reason else "check unavailable"
         setup_text = "not selected"
         if package.identifier in setup:
-            setup_text = "automatic restore enabled" if preferences.get("setup_enabled") else "saved; automatic restore paused"
+            setup_text = "startup prompt enabled" if preferences.get("setup_enabled") else "saved; startup prompt paused"
         status_text = {
             "installed": "installed here",
             "repairable": "repair needed",
-            "missing": "missing here; queued for Auto Setup" if package.identifier in setup else "not installed",
+            "missing": "not installed; saved in Auto Setup" if package.identifier in setup else "not installed",
         }[condition.status]
         if self.runtime_status.get(package.identifier) == "restoring":
             status_text = "restoring"

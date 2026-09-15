@@ -44,6 +44,8 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .modal-buttons Button { margin: 0 1; }
 .modal-copy { color: $gpm-muted; height: auto; margin-bottom: 1; }
 .welcome-modal { width: 72; }
+.auto-setup-prompt-modal { width: 72; max-height: 90%; }
+#auto-setup-prompt-list { height: auto; max-height: 10; margin-bottom: 1; padding: 0 1; background: $gpm-panel; color: $gpm-text; }
 .packs-modal { width: 72; height: 90%; max-height: 25; }
 .packs-modal OptionList { height: 6; background: $gpm-panel; border: round #49325e; }
 .packs-modal #pack-details { height: 1fr; min-height: 5; color: $gpm-muted; padding: 1; }
@@ -75,7 +77,7 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .theme-green #header { border-bottom: solid #22c55e; }
 .theme-green .panel { background: #0d1a13; border: round #28533a; }
 .theme-green .panel:focus-within { border: heavy #22c55e; }
-.theme-green #categories OptionList, .theme-green #package-table { background: #0d1a13; }
+.theme-green #categories OptionList, .theme-green #package-table, .theme-green #auto-setup-prompt-list { background: #0d1a13; color: #f1f7f3; }
 .theme-green #categories OptionList > .option-list--option-highlighted,
 .theme-green #package-table > .datatable--cursor { background: #166534; color: #f1f7f3; }
 .theme-green #categories OptionList:focus > .option-list--option-highlighted,
@@ -98,7 +100,7 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .theme-blue #header { border-bottom: solid #3b82f6; }
 .theme-blue .panel { background: #0d1524; border: round #294a78; }
 .theme-blue .panel:focus-within { border: heavy #3b82f6; }
-.theme-blue #categories OptionList, .theme-blue #package-table { background: #0d1524; }
+.theme-blue #categories OptionList, .theme-blue #package-table, .theme-blue #auto-setup-prompt-list { background: #0d1524; color: #f2f6fc; }
 .theme-blue #categories OptionList > .option-list--option-highlighted,
 .theme-blue #package-table > .datatable--cursor { background: #1e3a8a; color: #f2f6fc; }
 .theme-blue #categories OptionList:focus > .option-list--option-highlighted,
@@ -121,7 +123,7 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .theme-black #header { border-bottom: solid #d4d4d4; }
 .theme-black .panel { background: #0b0b0b; border: round #383838; }
 .theme-black .panel:focus-within { border: heavy #d4d4d4; }
-.theme-black #categories OptionList, .theme-black #package-table { background: #0b0b0b; }
+.theme-black #categories OptionList, .theme-black #package-table, .theme-black #auto-setup-prompt-list { background: #0b0b0b; color: #f5f5f5; }
 .theme-black #categories OptionList > .option-list--option-highlighted,
 .theme-black #package-table > .datatable--cursor { background: #404040; color: #f5f5f5; }
 .theme-black #categories OptionList:focus > .option-list--option-highlighted,
@@ -144,7 +146,7 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .theme-red #header { border-bottom: solid #ef4444; }
 .theme-red .panel { background: #201011; border: round #6b2b30; }
 .theme-red .panel:focus-within { border: heavy #ef4444; }
-.theme-red #categories OptionList, .theme-red #package-table { background: #201011; }
+.theme-red #categories OptionList, .theme-red #package-table, .theme-red #auto-setup-prompt-list { background: #201011; color: #fbf3f3; }
 .theme-red #categories OptionList > .option-list--option-highlighted,
 .theme-red #package-table > .datatable--cursor { background: #7f1d1d; color: #fbf3f3; }
 .theme-red #categories OptionList:focus > .option-list--option-highlighted,

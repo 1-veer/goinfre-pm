@@ -7,7 +7,7 @@ links in the home directory. It does not install system packages or require
 administrator access.
 
 Version 1.5 adds **Auto Setup**: an explicit roaming list of applications that
-GoinfrePM restores when its interactive TUI starts on another post. It verifies
+GoinfrePM offers to install when its interactive TUI starts on another post. It verifies
 the current post's payload and executable before claiming an app is installed,
 so a profile in the user's home directory can never create a false Installed
 status. Starter Packs and the basket still require review before installation.
@@ -76,15 +76,16 @@ npx --yes goinfre-pm@latest doctor
 npx --yes goinfre-pm@latest install zen-browser
 ```
 
-On an ordinary interactive launch, the TUI opens first and then visibly
-restores missing Auto Setup packages. To skip that restoration once:
+On an ordinary interactive launch, the TUI checks Auto Setup and shows a prompt
+listing every app that is not ready on the current post. Nothing is installed
+until the user chooses **Install now**. To skip that startup check once:
 
 ```sh
 npx --yes goinfre-pm@latest --no-restore
 ```
 
-List, search, doctor, version, and other noninteractive commands never trigger
-automatic restoration.
+List, search, doctor, version, and other noninteractive commands never show the
+prompt or install Auto Setup applications.
 
 The npm package contains the project files. It checks the workstation, runs the
 same idempotent `install.sh`, creates `~/.local/bin/gpm`, and then launches it.
@@ -229,18 +230,19 @@ state file and appear in the dedicated Favorites category.
 highlighted package with `m`, or select several packages with Space and press
 `M`. Mouse users can click the context-aware Auto Setup button in the details
 pane. The diamond marks Auto Setup membership. Adding a package explicitly
-enables interactive-launch restoration; `gpm setup disable` pauses it without
+enables the interactive-launch prompt; `gpm setup disable` pauses it without
 forgetting the list.
 
 At interactive startup GoinfrePM checks the selected root and classifies each
-package as **Installed here**, **Repair needed**, **Missing here**, or **Not
-installed**. A home-directory profile (for example Zen Browser's settings) is
-not installation evidence. The **Missing Here** section lists Auto Setup apps
-whose payload is absent on the current post; those are the only apps queued for
-cross-post restoration. They are restored sequentially in the task panel, with
-package count, progress, logs, cancellation, and a final
-success/failure/skipped summary. Healthy payloads are never redownloaded or
-automatically updated; broken integration is repaired without downloading.
+package as **Installed here**, **Repair needed**, or **Not installed here**. A
+home-directory profile (for example Zen Browser's settings) is not installation
+evidence. If any Auto Setup apps are absent or need repair, a modal lists their
+names and asks **Set up this post?** Choose **Install now** to continue or **Not
+now** to open GoinfrePM without changing application files. Confirmed apps are
+handled sequentially in the task panel, with package count, progress, logs,
+cancellation, and a final success/failure/skipped summary. Healthy payloads are
+never redownloaded or automatically updated; broken integration is repaired
+without downloading.
 
 Failures do not stop later packages. They are shown as Auto-install failed for the
 current session and may be retried on the next launch or with `gpm setup
@@ -436,14 +438,14 @@ commands, PATH, state, integrations, catalog validity, and architecture.
 - **Application does not launch:** inspect `<root>/logs/<package>.log`, run
   `gpm doctor`, then `gpm repair`.
 - **An app was installed on another post:** add it to Auto Setup once with `m` or
-  `gpm setup add PACKAGE`. On the new post it appears under Missing Here and is
-  restored at the next interactive launch. Run `gpm setup restore` to retry now.
+  `gpm setup add PACKAGE`. On the new post the startup prompt lists it; choose
+  **Install now**, or run `gpm setup restore` when you are ready.
 - **Unexpected old Installed status:** version 1.5 no longer trusts roaming
   installation records. Run `gpm doctor`; a valid payload with missing metadata
-  is shown as Repair needed, while an absent payload is Missing here or Not
-  installed.
-- **Pause startup downloads:** run `gpm setup disable`, or use
-  `npx goinfre-pm --no-restore` for one launch.
+  is shown as Repair needed, while an absent payload is Not installed here.
+- **Hide the Auto Setup prompt:** run `gpm setup disable`, or use
+  `npx goinfre-pm --no-restore` for one launch. Re-enable it later with
+  `gpm setup enable`.
 - **The TUI closes unexpectedly:** inspect `~/.config/goinfre-pm/crash.log`.
   Unexpected failures are recorded there without dumping a traceback over the
   terminal interface.
