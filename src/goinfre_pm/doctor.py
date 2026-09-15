@@ -9,9 +9,9 @@ import sys
 
 from .config import ConfigurationError, load_packages
 from .experience import human_size
-from .integration import DESKTOP_DIR, USER_BIN
-from .models import Package
-from .storage import StateStore, available_space, is_writable_directory, resolve_install_root
+from .integration import DESKTOP_DIR, USER_BIN, find_executable
+from .models import Package, validate_package_id
+from .storage import Layout, LocalStateStore, StateStore, available_space, is_writable_directory, resolve_install_root
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,7 @@ def collect_doctor_checks(
     root: Path | None = None,
     packages: list[Package] | None = None,
     state: StateStore | None = None,
+    installations: LocalStateStore | None = None,
 ) -> list[DoctorCheck]:
     checks: list[DoctorCheck] = []
     root = resolve_install_root() if root is None else root
@@ -64,25 +65,61 @@ def collect_doctor_checks(
     checks.append(DoctorCheck("ok" if not incompatible else "error", "Architecture", "All enabled packages compatible" if not incompatible else ", ".join(incompatible), "GoinfrePM targets Ubuntu 22.04 x86_64." if incompatible else ""))
 
     state_data = (state or StateStore()).read()
-    installed = state_data.get("installed", {})
+    installed: dict[str, object] = {}
+    layout = Layout.at(root) if root is not None else None
+    if layout is not None:
+        installed = (installations or LocalStateStore(layout)).read().get("installed", {})
     broken_executables: list[str] = []
     broken_commands: list[str] = []
     missing_desktop: list[str] = []
     package_map = {package.identifier: package for package in packages}
-    if isinstance(installed, dict):
-        for identifier, record in installed.items():
+    identifiers = set(installed)
+    if layout is not None and layout.apps.is_dir():
+        for child in layout.apps.iterdir():
+            try:
+                identifiers.add(validate_package_id(child.name))
+            except ValueError:
+                continue
+    if isinstance(installed, dict) and layout is not None:
+        for identifier in sorted(identifiers):
+            record = installed.get(identifier, {})
             if not isinstance(record, dict):
                 broken_executables.append(str(identifier))
                 continue
-            if not Path(str(record.get("executable", ""))).is_file():
-                broken_executables.append(str(identifier))
-            command = USER_BIN / str(identifier)
-            if not command.exists():
-                broken_commands.append(str(identifier))
             package = package_map.get(str(identifier))
+            live = layout.apps / str(identifier)
+            executable = find_executable(live, package) if package and live.is_dir() else None
+            if executable is None or not executable.is_file() or not os.access(executable, os.X_OK):
+                broken_executables.append(str(identifier))
+                if not (USER_BIN / str(identifier)).exists():
+                    broken_commands.append(str(identifier))
+                if package and package.desktop and not (DESKTOP_DIR / f"{identifier}.desktop").is_file():
+                    missing_desktop.append(str(identifier))
+                continue
+            command = USER_BIN / str(identifier)
+            try:
+                command_ok = command.is_symlink() and command.resolve(strict=True) == executable.resolve(strict=True)
+            except OSError:
+                command_ok = False
+            if not command_ok:
+                broken_commands.append(str(identifier))
             if package and package.desktop and not (DESKTOP_DIR / f"{identifier}.desktop").is_file():
                 missing_desktop.append(str(identifier))
     checks.append(DoctorCheck("ok" if not broken_executables else "error", "Executables", "Intact" if not broken_executables else ", ".join(broken_executables), "Run `gpm repair` or reinstall affected packages." if broken_executables else ""))
     checks.append(DoctorCheck("ok" if not broken_commands else "error", "Command links", "Intact" if not broken_commands else ", ".join(broken_commands), "Run `gpm repair`." if broken_commands else ""))
     checks.append(DoctorCheck("ok" if not missing_desktop else "warning", "Desktop launchers", "Intact" if not missing_desktop else ", ".join(missing_desktop), "Run `gpm repair`." if missing_desktop else ""))
+    setup = state_data.get("setup_packages", [])
+    missing_setup: list[str] = []
+    if isinstance(setup, list) and layout is not None:
+        for identifier in setup:
+            package = package_map.get(str(identifier))
+            live = layout.apps / str(identifier)
+            executable = find_executable(live, package) if package and live.is_dir() else None
+            if executable is None or not os.access(executable, os.X_OK):
+                missing_setup.append(str(identifier))
+    setup_enabled = bool(state_data.get("setup_enabled"))
+    setup_detail = f"{len(setup) if isinstance(setup, list) else 0} selected; automatic restore {'enabled' if setup_enabled else 'disabled'}"
+    setup_status = "warning" if missing_setup else "ok"
+    setup_action = f"Run `gpm setup restore` for: {', '.join(missing_setup)}" if missing_setup else ""
+    checks.append(DoctorCheck(setup_status, "My Setup", setup_detail, setup_action))
     return checks

@@ -11,6 +11,7 @@ from .doctor import collect_doctor_checks
 from .errors import error_text, write_crash_log
 from .integration import AUTOSTART_DIR, USER_BIN
 from .installer import PackageManager
+from .models import validate_package_id
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root, verify_install_root
 
 
@@ -37,12 +38,27 @@ def _manager() -> PackageManager:
     return PackageManager(layout, load_packages())
 
 
-def _emit(events: object) -> None:
+def _emit(events: object) -> bool:
+    failed = False
     for kind, value in events:  # type: ignore[union-attr]
         if kind == "log":
             print(value)
         elif kind == "progress" and sys.stdout.isatty():
             print(f"Progress: {value}%", end="\r" if value != 100 else "\n")
+        elif kind == "package":
+            identifier, index, total = value
+            print(f"Restoring My Setup — package {index} of {total}: {identifier}")
+        elif kind == "failed":
+            identifier, reason = value
+            print(f"Failed {identifier}: {reason}", file=sys.stderr)
+            failed = True
+        elif kind == "skipped":
+            identifier, reason = value
+            print(f"Skipped {identifier}: {reason}")
+        elif kind == "cancelled":
+            print(f"Cancelled {value}", file=sys.stderr)
+            failed = True
+    return failed
 
 
 def _autostart_path() -> Path:
@@ -82,11 +98,12 @@ def doctor() -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=COMMAND, description=f"{DISPLAY_NAME} — no-sudo goinfre package manager")
+    parser.add_argument("--no-restore", action="store_true", help="skip automatic My Setup restoration for this launch")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("list", help="list packages")
     search = sub.add_parser("search", help="search packages")
     search.add_argument("query")
-    for name in ("install", "update"):
+    for name in ("install", "update", "reinstall"):
         command = sub.add_parser(name, help=f"{name} packages")
         command.add_argument("packages", nargs="*")
         if name == "update":
@@ -95,8 +112,18 @@ def build_parser() -> argparse.ArgumentParser:
     remove.add_argument("packages", nargs="+")
     remove.add_argument("--purge-cache", action="store_true")
     remove.add_argument("--purge-config", action="store_true", help="explicitly remove allowlisted user configuration")
+    remove.add_argument("--keep-setup", action="store_true", help="keep removed packages in My Setup")
     sub.add_parser("repair", help="repair launchers and symlinks")
-    sub.add_parser("restore", help="restore explicitly desired packages")
+    sub.add_parser("restore", help="restore missing My Setup packages")
+    setup = sub.add_parser("setup", help="manage the roaming My Setup package list")
+    setup_sub = setup.add_subparsers(dest="setup_command")
+    setup_sub.add_parser("list", help="show My Setup")
+    for name in ("add", "remove"):
+        setup_packages = setup_sub.add_parser(name, help=f"{name} packages {'to' if name == 'add' else 'from'} My Setup")
+        setup_packages.add_argument("packages", nargs="+")
+    setup_sub.add_parser("restore", help="restore missing My Setup packages now")
+    setup_sub.add_parser("enable", help="enable restore when the interactive TUI starts")
+    setup_sub.add_parser("disable", help="disable automatic restore without clearing My Setup")
     path = sub.add_parser("path", help="show or set install path")
     path_sub = path.add_subparsers(dest="path_command")
     path_set = path_sub.add_parser("set", help="persist an explicit writable root")
@@ -111,14 +138,26 @@ def build_parser() -> argparse.ArgumentParser:
 def _print_packages(query: str = "") -> None:
     terms = query.casefold()
     packages = load_packages()
-    state = StateStore().read().get("installed", {})
+    root = resolve_install_root()
+    manager = PackageManager(Layout.at(root), packages) if root is not None else None
+    setup = set(StateStore().read().get("setup_packages", []))
     for package in packages:
-        if not package.enabled and package.identifier not in state:
+        condition = manager.installation(package.identifier) if manager is not None else None
+        if not package.enabled and not (condition and condition.payload_present):
             continue
         haystack = f"{package.identifier} {package.name} {package.description} {package.category}".casefold()
         if terms and terms not in haystack:
             continue
-        status = "unsupported" if not package.enabled else ("installed" if package.identifier in state else "available")
+        if not package.enabled:
+            status = "unsupported"
+        elif condition and condition.healthy:
+            status = "installed"
+        elif condition and condition.status == "repairable":
+            status = "repairable"
+        elif package.identifier in setup:
+            status = "restore"
+        else:
+            status = "available"
         compatible = "" if package.compatible else " [incompatible]"
         print(f"{package.identifier:20} {status:10} {package.category:18} {package.name}{compatible}")
 
@@ -136,16 +175,16 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError(f"Path is not writable: {chosen}")
                 persist_root(chosen)
             from .app import run_tui
-            run_tui()
+            run_tui(auto_restore=not args.no_restore)
         elif args.command == "list":
             _print_packages()
         elif args.command == "search":
             _print_packages(args.query)
-        elif args.command in {"install", "update"}:
+        elif args.command in {"install", "update", "reinstall"}:
             manager = _manager()
             identifiers = list(args.packages)
             if args.command == "update" and args.all:
-                identifiers = list(manager.state.read().get("installed", {}).keys())
+                identifiers = [identifier for identifier in manager.packages if manager.installed(identifier)]
             if not identifiers:
                 raise RuntimeError("Specify at least one package (or use update --all)")
             for identifier in identifiers:
@@ -163,21 +202,60 @@ def main(argv: list[str] | None = None) -> int:
                         end="\r",
                     )
 
-                operation = manager.update if args.command == "update" else manager.install
+                if args.command == "update":
+                    operation = manager.update
+                elif args.command == "reinstall":
+                    operation = manager.reinstall
+                else:
+                    operation = manager.install
                 _emit(operation(identifier, progress_callback=cli_progress, transfer_callback=cli_transfer))
         elif args.command == "remove":
             manager = _manager()
             for identifier in args.packages:
-                _emit(manager.remove(identifier, args.purge_cache, args.purge_config))
+                _emit(manager.remove(identifier, args.purge_cache, args.purge_config, args.keep_setup))
         elif args.command == "repair":
             manager = _manager()
-            installed = manager.state.read().get("installed", {})
-            for identifier in installed:
-                if identifier in manager.packages and manager.installed(identifier):
+            for identifier in manager.packages:
+                if manager.installation(identifier).status == "repairable":
                     manager.repair(identifier)
                     print(f"Repaired {identifier}")
         elif args.command == "restore":
-            _emit(_manager().restore())
+            if _emit(_manager().restore()):
+                return 1
+        elif args.command == "setup":
+            state = StateStore()
+            data = state.read()
+            setup_command = args.setup_command or "list"
+            if setup_command == "list":
+                enabled = "enabled" if data.get("setup_enabled") else "disabled"
+                print(f"My Setup automatic restore: {enabled}")
+                packages = data.get("setup_packages", [])
+                if packages:
+                    for identifier in packages:
+                        print(identifier)
+                else:
+                    print("(empty)")
+            elif setup_command in {"add", "remove"}:
+                catalog = {package.identifier: package for package in load_packages()}
+                selected: list[str] = []
+                for identifier in args.packages:
+                    package = catalog.get(identifier)
+                    if package is None and setup_command == "add":
+                        raise RuntimeError(f"Unknown package: {identifier}")
+                    if setup_command == "add" and package is not None and (not package.enabled or not package.compatible):
+                        raise RuntimeError(f"{package.name} is unavailable or incompatible")
+                    selected.append(validate_package_id(identifier))
+                state.set_setup_packages(selected, setup_command == "add")
+                for identifier in selected:
+                    label = catalog[identifier].name if identifier in catalog else identifier
+                    print(f"{label}: {'added to' if setup_command == 'add' else 'removed from'} My Setup")
+            elif setup_command == "restore":
+                if _emit(_manager().restore()):
+                    return 1
+            elif setup_command in {"enable", "disable"}:
+                enabled = setup_command == "enable"
+                state.set_setup_enabled(enabled)
+                print(f"My Setup automatic restore {'enabled' if enabled else 'disabled'}.")
         elif args.command == "path":
             if args.path_command == "set":
                 root = args.directory.expanduser().resolve()

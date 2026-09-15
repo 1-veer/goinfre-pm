@@ -166,7 +166,10 @@ choose_root() {
             die "No writable goinfre root found. Set GPM_INSTALL_ROOT or GOINFRE and retry."
         fi
     fi
-    mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs" || die "Cannot create storage layout at $GPM_ROOT"
+    for storage_name in apps downloads runtime logs; do
+        [ ! -L "$GPM_ROOT/$storage_name" ] || die "Refusing symlinked storage directory: $GPM_ROOT/$storage_name"
+    done
+    mkdir -p "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/runtime" "$GPM_ROOT/logs" || die "Cannot create storage layout at $GPM_ROOT"
 }
 
 choose_root
@@ -179,7 +182,7 @@ if [ "${1:-}" = "uninstall" ]; then
     rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
     rm -rf "$MANAGER_HOME"
     warn "Purging application payloads because --purge-data was explicitly supplied."
-    rm -rf "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/logs"
+    rm -rf "$GPM_ROOT/apps" "$GPM_ROOT/downloads" "$GPM_ROOT/runtime" "$GPM_ROOT/logs"
     ok "$PROJECT_DISPLAY_NAME runtime removed."
     exit 0
 fi
@@ -232,10 +235,13 @@ chmod 755 "$LAUNCHER"
 
 # Versions before 1.1.1 placed the manager itself in goinfre. Only reclaim
 # those obsolete copies after the persistent launcher has passed startup.
-if [ -d "$GPM_ROOT/venv" ] || [ -d "$GPM_ROOT/runtime" ]; then
-    rm -rf "$GPM_ROOT/venv" "$GPM_ROOT/runtime"
+if [ -d "$GPM_ROOT/venv" ]; then
+    rm -rf "$GPM_ROOT/venv"
     ok "Removed obsolete manager runtime from goinfre"
 fi
+# Very old releases copied these two manager files into goinfre/runtime. The
+# directory now owns post-local installation metadata, so never remove it.
+rm -f "$GPM_ROOT/runtime/packages.toml" "$GPM_ROOT/runtime/project.conf"
 
 append_path() {
     rcfile=$1

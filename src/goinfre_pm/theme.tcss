@@ -28,6 +28,7 @@ Screen { background: $gpm-background; color: $gpm-text; layers: base overlay; }
 #details { width: 1fr; min-width: 26; padding: 1; color: $gpm-text; }
 #details-title { height: 2; color: $gpm-lavender; text-style: bold; }
 #details-body { height: 1fr; color: $gpm-muted; }
+#setup-toggle-button { width: 1fr; height: 3; margin-top: 1; }
 #tasks { dock: bottom; height: 7; background: $gpm-panel-raised; border-top: solid #49325e; }
 #operation { height: 1; padding: 0 1; color: $gpm-lavender; }
 #progress { height: 1; margin: 0 1; color: $gpm-violet; }
@@ -49,6 +50,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .sort-modal { width: 44; height: 16; }
 .sort-modal OptionList { height: 1fr; background: $gpm-panel; border: round #49325e; }
 .summary-modal { width: 72; max-height: 90%; overflow-y: auto; }
+.action-modal { width: 76; }
+.removal-modal { width: 76; }
+.action-buttons { height: 5; }
 .doctor-modal { width: 78; height: 90%; max-height: 28; }
 .doctor-modal DataTable { height: 1fr; background: $gpm-panel; }
 #doctor-action { height: 3; color: $gpm-amber; padding: 1; }

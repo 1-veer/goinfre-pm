@@ -1,4 +1,4 @@
-# GoinfrePM 1.4 development progress
+# GoinfrePM development progress
 
 This file records recoverable checkpoints for the student-experience upgrade.
 
@@ -31,3 +31,31 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - [x] Replace the dot/circle row controls with clear checkbox markers and stars only for favorites.
 - [x] Label direct downloads as catalog-managed and failed GitHub checks as unavailable instead of “update unknown”.
 - [x] Prevent normal install actions from replacing installed payloads; retain replacement only through the explicit update command.
+
+## 1.5.0 My Setup and cross-post restore
+
+### Baseline
+
+- Source: clean `1.4.1` at commit `303fd75`.
+- Baseline validation: 82 Python tests passed on macOS.
+- Target remains Ubuntu 22.04 LTS x86_64 without sudo.
+
+### Checkpoints
+
+- [x] Audit roaming state, install-root state, TUI status logic, restore behavior, and npx argument forwarding.
+- [x] Split schema-v3 roaming preferences from the root-local installation manifest.
+- [x] Conservatively migrate only verified legacy payloads; do not enroll old desired packages into My Setup.
+- [x] Add live payload/executable/integration classification and cross-post simulations.
+- [x] Add atomic My Setup persistence, enable/disable controls, root-local locking, and selective restore events.
+- [x] Add explicit reinstall with rollback and safe My Setup-aware removal behavior.
+- [x] Add My Setup / Needs Restore TUI sections, keyboard controls, startup restore, cancellation, and summary states.
+- [x] Complete documentation, release audit, isolated wheel installation smoke test, and full available validation matrix.
+
+### Current validation
+
+- Release metadata is synchronized at `1.5.0`.
+- 109 Python tests pass on macOS, including two-post state, selective restore, cancellation, rollback, locking, CLI dispatch, mouse/keyboard My Setup controls, and 80×24 Textual pilots.
+- Python compilation and 3.10 grammar parsing, shell syntax, npm tests, the 28-file npm dry-run package, SVG parsing, and an isolated 1.5.0 wheel build/install/`gpm version` smoke test pass.
+- Bandit reports no medium/high findings; its three low findings are the intentional argument-array subprocesses for `dpkg-deb`, AppImage extraction, and `update-desktop-database`. `pip-audit` reports no known dependency vulnerabilities.
+- `shellcheck` is unavailable locally. Docker is installed but its daemon is not running, so the full Ubuntu 22.04 installer and GUI launch matrix remains a release check on a school workstation.
+- No commit, push, or npm publication has been performed.

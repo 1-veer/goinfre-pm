@@ -1,22 +1,101 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 import os
 import shutil
+import stat
 import tempfile
 import threading
 import time
 import uuid
 
-from .downloader import download
+from . import integration as integration_module
+from .downloader import DownloadCancelled, download
 from .extractor import extract_download
 from .integration import find_executable, integrate, remove_integration, validate_user_data_path
 from .models import InstalledPackage, Package
-from .storage import Layout, StateStore, available_space, verify_install_root
+from .storage import Layout, LocalStateStore, StateStore, available_space, verify_install_root
 
 Event = tuple[str, object]
+
+
+@dataclass(frozen=True)
+class InstallationCheck:
+    status: str
+    executable: Path | None = None
+    reason: str = ""
+
+    @property
+    def payload_present(self) -> bool:
+        return self.status in {"installed", "repairable"}
+
+    @property
+    def healthy(self) -> bool:
+        return self.status == "installed"
+
+
+class OperationLock:
+    """Root-local process lock preventing overlapping payload mutations."""
+
+    def __init__(self, layout: Layout) -> None:
+        self.path = layout.runtime / "operation.lock"
+        self.token = uuid.uuid4().hex
+        self.acquired = False
+
+    def __enter__(self) -> "OperationLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        for _attempt in range(2):
+            try:
+                descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                if self._remove_stale():
+                    continue
+                raise RuntimeError("Another GoinfrePM operation is already active for this install root")
+            payload = json.dumps({"pid": os.getpid(), "token": self.token, "created_at": time.time()})
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            self.acquired = True
+            return self
+        raise RuntimeError("Could not acquire the GoinfrePM operation lock")
+
+    def _remove_stale(self) -> bool:
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            pid = int(value.get("pid", 0))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pid = 0
+        if pid > 0:
+            try:
+                os.kill(pid, 0)
+                return False
+            except PermissionError:
+                return False
+            except ProcessLookupError:
+                pass
+        try:
+            self.path.unlink()
+            return True
+        except FileNotFoundError:
+            return True
+        except OSError:
+            return False
+
+    def __exit__(self, _error_type: object, _error: object, _traceback: object) -> None:
+        if not self.acquired:
+            return
+        try:
+            value = json.loads(self.path.read_text(encoding="utf-8"))
+            if value.get("token") == self.token:
+                self.path.unlink()
+        except (OSError, json.JSONDecodeError):
+            pass
+        self.acquired = False
 
 
 def directory_size(root: Path) -> int:
@@ -32,10 +111,19 @@ def directory_size(root: Path) -> int:
 
 
 class PackageManager:
-    def __init__(self, layout: Layout, packages: list[Package], state: StateStore | None = None) -> None:
+    def __init__(
+        self,
+        layout: Layout,
+        packages: list[Package],
+        state: StateStore | None = None,
+        installations: LocalStateStore | None = None,
+    ) -> None:
         self.layout = layout
         self.packages = {package.identifier: package for package in packages}
         self.state = state or StateStore()
+        self.layout.create()
+        self.installations = installations or LocalStateStore(layout)
+        self._migrate_legacy_state()
 
     def package(self, identifier: str) -> Package:
         try:
@@ -43,8 +131,85 @@ class PackageManager:
         except KeyError as exc:
             raise RuntimeError(f"Unknown package: {identifier}") from exc
 
+    def installation(self, identifier: str) -> InstallationCheck:
+        package = self.package(identifier)
+        live = self.layout.apps / identifier
+        if not live.is_dir():
+            return InstallationCheck("missing", reason="application payload is absent from this post")
+        executable = find_executable(live, package)
+        if executable is None or not self._valid_executable(live, executable):
+            return InstallationCheck("missing", reason="application executable is missing or invalid")
+        record = self.installations.read()["installed"].get(identifier)
+        if not isinstance(record, dict):
+            return InstallationCheck("repairable", executable, "root-local installation record is missing")
+        recorded = Path(str(record.get("executable", ""))).expanduser()
+        try:
+            same_executable = recorded.resolve() == executable.resolve()
+        except OSError:
+            same_executable = False
+        command = integration_module.USER_BIN / identifier
+        try:
+            command_ok = command.is_symlink() and command.resolve(strict=True) == executable.resolve(strict=True)
+        except OSError:
+            command_ok = False
+        desktop_ok = self._desktop_launcher_ok(package, executable)
+        if not same_executable or not command_ok or not desktop_ok:
+            return InstallationCheck("repairable", executable, "launcher or local installation metadata needs repair")
+        return InstallationCheck("installed", executable)
+
     def installed(self, identifier: str) -> bool:
-        return (self.layout.apps / identifier).is_dir()
+        return self.installation(identifier).payload_present
+
+    def package_status(self, identifier: str) -> str:
+        condition = self.installation(identifier)
+        if condition.healthy:
+            return "installed"
+        if condition.status == "repairable":
+            return "repairable"
+        setup = set(self.state.read().get("setup_packages", []))
+        return "needs_restore" if identifier in setup else "not_installed"
+
+    @staticmethod
+    def _valid_executable(live: Path, executable: Path) -> bool:
+        try:
+            executable.resolve(strict=True).relative_to(live.resolve(strict=True))
+            mode = executable.stat().st_mode
+            return stat.S_ISREG(mode) and os.access(executable, os.X_OK)
+        except (OSError, ValueError):
+            return False
+
+    @staticmethod
+    def _desktop_launcher_ok(package: Package, executable: Path) -> bool:
+        if not package.desktop:
+            return True
+        launcher = integration_module.DESKTOP_DIR / f"{package.identifier}.desktop"
+        try:
+            expected = next(
+                line for line in integration_module.desktop_entry(package, executable).splitlines()
+                if line.startswith("Exec=")
+            )
+            return expected in launcher.read_text(encoding="utf-8").splitlines()
+        except (OSError, StopIteration, UnicodeError):
+            return False
+
+    def _migrate_legacy_state(self) -> None:
+        preferences = self.state.read()
+        if not preferences.get("legacy_migration_pending"):
+            return
+        legacy = preferences.get("legacy_installed", {})
+        if isinstance(legacy, dict):
+            for identifier, value in legacy.items():
+                if identifier not in self.packages or not isinstance(value, dict):
+                    continue
+                package = self.packages[identifier]
+                live = self.layout.apps / identifier
+                executable = find_executable(live, package) if live.is_dir() else None
+                if executable is None or not self._valid_executable(live, executable):
+                    continue
+                previous = InstalledPackage.from_dict(identifier, value)
+                previous.executable = str(executable)
+                self.installations.set_installed(previous)
+        self.state.finish_legacy_migration()
 
     @staticmethod
     def _apply_actions(package: Package, staging: Path) -> None:
@@ -78,10 +243,19 @@ class PackageManager:
         progress_callback: Callable[[float], None] | None = None,
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
     ) -> Iterator[Event]:
-        package = self.package(identifier)
-        if self.installed(identifier):
-            raise RuntimeError(f"{package.name} is already installed; use the update command instead")
-        yield from self._install(identifier, cancel, progress_callback, transfer_callback)
+        with OperationLock(self.layout):
+            package = self.package(identifier)
+            condition = self.installation(identifier)
+            if condition.healthy:
+                raise RuntimeError(
+                    f"{package.name} is already installed; use update or explicit reinstall instead"
+                )
+            if condition.status == "repairable":
+                raise RuntimeError(
+                    f"{package.name} already has a payload that needs repair; "
+                    "use repair, update, or explicit reinstall instead"
+                )
+            yield from self._install(identifier, cancel, progress_callback, transfer_callback, "Installed")
 
     def update(
         self,
@@ -90,10 +264,24 @@ class PackageManager:
         progress_callback: Callable[[float], None] | None = None,
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
     ) -> Iterator[Event]:
-        package = self.package(identifier)
-        if not self.installed(identifier):
-            raise RuntimeError(f"{package.name} is not installed; use the install command instead")
-        yield from self._install(identifier, cancel, progress_callback, transfer_callback)
+        with OperationLock(self.layout):
+            package = self.package(identifier)
+            if not self.installed(identifier):
+                raise RuntimeError(f"{package.name} is not installed; use the install command instead")
+            yield from self._install(identifier, cancel, progress_callback, transfer_callback, "Updated")
+
+    def reinstall(
+        self,
+        identifier: str,
+        cancel: threading.Event | None = None,
+        progress_callback: Callable[[float], None] | None = None,
+        transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+    ) -> Iterator[Event]:
+        with OperationLock(self.layout):
+            package = self.package(identifier)
+            if not self.installed(identifier):
+                raise RuntimeError(f"{package.name} is not installed; use the install command instead")
+            yield from self._install(identifier, cancel, progress_callback, transfer_callback, "Reinstalled")
 
     def _install(
         self,
@@ -101,6 +289,7 @@ class PackageManager:
         cancel: threading.Event | None = None,
         progress_callback: Callable[[float], None] | None = None,
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+        completed_action: str = "Installed",
     ) -> Iterator[Event]:
         package = self.package(identifier)
         if not package.enabled:
@@ -153,8 +342,12 @@ class PackageManager:
                         last_transfer_emit = now
 
                 archive, version = download(package, operation, on_progress, log, cancel)
+                if cancel is not None and cancel.is_set():
+                    raise DownloadCancelled("Installation cancelled")
                 yield ("progress", 45)
                 extract_download(archive, staging, package.source_type, operation)
+                if cancel is not None and cancel.is_set():
+                    raise DownloadCancelled("Installation cancelled")
                 self._apply_actions(package, staging)
                 yield ("progress", 75)
                 executable = find_executable(staging, package)
@@ -169,8 +362,6 @@ class PackageManager:
                 executable = live / executable_relative
                 launchers = integrate(package, executable, live)
                 installed_size = directory_size(live)
-                if backup.exists():
-                    shutil.rmtree(backup)
                 record = InstalledPackage(
                     identifier=identifier,
                     version=version,
@@ -181,9 +372,11 @@ class PackageManager:
                     download_size=archive.stat().st_size,
                     installed_size=installed_size,
                 )
-                self.state.set_installed(record, install_root=self.layout.root)
+                self.installations.set_installed(record)
+                if backup.exists():
+                    shutil.rmtree(backup, ignore_errors=True)
                 yield ("progress", 100)
-                yield ("log", f"Installed {package.name} {version}")
+                yield ("log", f"{completed_action} {package.name} {version}")
             except BaseException:
                 if staging.exists():
                     shutil.rmtree(staging, ignore_errors=True)
@@ -205,6 +398,10 @@ class PackageManager:
                 raise
 
     def repair(self, identifier: str) -> list[str]:
+        with OperationLock(self.layout):
+            return self._repair(identifier)
+
+    def _repair(self, identifier: str) -> list[str]:
         package = self.package(identifier)
         live = self.layout.apps / identifier
         if not live.is_dir():
@@ -213,7 +410,7 @@ class PackageManager:
         if executable is None:
             raise RuntimeError(f"No executable found for {package.name}")
         launchers = integrate(package, executable, live)
-        state = self.state.read()
+        state = self.installations.read()
         existing = state.get("installed", {}).get(identifier, {})
         record = InstalledPackage(
             identifier=identifier,
@@ -225,38 +422,107 @@ class PackageManager:
             download_size=existing.get("download_size") if isinstance(existing.get("download_size"), int) else None,
             installed_size=directory_size(live),
         )
-        self.state.set_installed(record, desired=identifier in state.get("desired", []), install_root=self.layout.root)
+        self.installations.set_installed(record)
         return launchers
 
-    def remove(self, identifier: str, remove_cache: bool = False, remove_config: bool = False) -> Iterator[Event]:
+    def remove(
+        self,
+        identifier: str,
+        remove_cache: bool = False,
+        remove_config: bool = False,
+        keep_setup: bool = False,
+    ) -> Iterator[Event]:
         package = self.package(identifier)
-        live = self.layout.apps / identifier
-        if live.parent.resolve() != self.layout.apps.resolve() or live.name != identifier:
-            raise RuntimeError(f"Unsafe application removal target: {live}")
-        state = self.state.read()
-        record = state.get("installed", {}).get(identifier, {})
-        remove_integration(package, record.get("launchers", []) if isinstance(record, dict) else [])
-        if live.is_dir():
-            shutil.rmtree(live)
-            yield ("log", f"Removed application files for {package.name}")
+        cache_target: Path | None = None
+        config_targets: list[Path] = []
         if remove_cache:
-            cache = Path.home() / ".cache" / identifier
-            safe = validate_user_data_path(cache, package, cache=True)
-            if safe.exists():
-                shutil.rmtree(safe) if safe.is_dir() else safe.unlink()
-                yield ("log", f"Removed cache {safe}")
+            cache_target = validate_user_data_path(Path.home() / ".cache" / identifier, package, cache=True)
         if remove_config:
             if not package.remove_user_config:
                 raise RuntimeError(f"Configuration removal is not enabled for {package.name}")
-            for configured in package.config_paths:
-                safe = validate_user_data_path(Path(configured), package, cache=False)
-                if safe.exists():
-                    shutil.rmtree(safe) if safe.is_dir() else safe.unlink()
-                    yield ("log", f"Removed user configuration {safe}")
-        self.state.remove(identifier)
+            config_targets = [
+                validate_user_data_path(Path(configured), package, cache=False)
+                for configured in package.config_paths
+            ]
+        with OperationLock(self.layout):
+            live = self.layout.apps / identifier
+            if live.parent.resolve() != self.layout.apps.resolve() or live.name != identifier:
+                raise RuntimeError(f"Unsafe application removal target: {live}")
+            setup_was_selected = identifier in set(self.state.read().get("setup_packages", []))
+            if setup_was_selected and not keep_setup:
+                # Forget first so a successful removal can never be unexpectedly
+                # restored. If the root mutation fails, restore the preference.
+                self.state.set_setup_package(identifier, False)
+            try:
+                state = self.installations.read()
+                record = state.get("installed", {}).get(identifier, {})
+                remove_integration(package, record.get("launchers", []) if isinstance(record, dict) else [])
+                if live.is_dir():
+                    shutil.rmtree(live)
+                    yield ("log", f"Removed application files for {package.name}")
+                if cache_target is not None and cache_target.exists():
+                    shutil.rmtree(cache_target) if cache_target.is_dir() else cache_target.unlink()
+                    yield ("log", f"Removed cache {cache_target}")
+                for target in config_targets:
+                    if target.exists():
+                        shutil.rmtree(target) if target.is_dir() else target.unlink()
+                        yield ("log", f"Removed user configuration {target}")
+                self.installations.remove(identifier)
+            except BaseException:
+                if setup_was_selected and not keep_setup:
+                    self.state.set_setup_package(identifier, True)
+                raise
 
-    def restore(self) -> Iterator[Event]:
-        desired = self.state.read().get("desired", [])
-        for identifier in desired:
-            if identifier in self.packages and self.packages[identifier].enabled and not self.installed(identifier):
-                yield from self.install(identifier)
+    def restore(
+        self,
+        cancel: threading.Event | None = None,
+        identifiers: list[str] | None = None,
+        progress_callback: Callable[[float], None] | None = None,
+        transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+    ) -> Iterator[Event]:
+        verify_install_root(self.layout.root)
+        raw_identifiers = self.state.read().get("setup_packages", []) if identifiers is None else identifiers
+        setup = set(self.state.read().get("setup_packages", []))
+        identifiers = [item for item in raw_identifiers if isinstance(item, str) and item in setup]
+        with OperationLock(self.layout):
+            total = len(identifiers)
+            for index, identifier in enumerate(identifiers, 1):
+                if cancel is not None and cancel.is_set():
+                    for remaining in identifiers[index - 1:]:
+                        yield ("cancelled", remaining)
+                    break
+                yield ("package", (identifier, index, total))
+                if identifier not in self.packages:
+                    yield ("skipped", (identifier, "not present in this catalog"))
+                    continue
+                package = self.packages[identifier]
+                if not package.enabled or not package.compatible:
+                    yield ("skipped", (identifier, "unavailable or incompatible"))
+                    continue
+                condition = self.installation(identifier)
+                if condition.healthy:
+                    yield ("skipped", (identifier, "already installed here"))
+                elif condition.status == "repairable":
+                    try:
+                        self._repair(identifier)
+                        yield ("restored", identifier)
+                        yield ("log", f"Repaired {package.name} without downloading it again")
+                    except Exception as exc:
+                        yield ("failed", (identifier, str(exc)))
+                else:
+                    try:
+                        yield from self._install(
+                            identifier,
+                            cancel,
+                            progress_callback,
+                            transfer_callback,
+                            completed_action="Restored",
+                        )
+                        yield ("restored", identifier)
+                    except DownloadCancelled:
+                        yield ("cancelled", identifier)
+                        for remaining in identifiers[index:]:
+                            yield ("cancelled", remaining)
+                        break
+                    except Exception as exc:
+                        yield ("failed", (identifier, str(exc)))
