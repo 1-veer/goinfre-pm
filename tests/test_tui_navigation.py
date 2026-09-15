@@ -202,7 +202,12 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
             app.category = "Auto Setup"
             app._refresh()
             assert [package.identifier for package in app.visible_packages] == [packages[0].identifier]
-            assert "Missing here" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
+            assert "Not installed here" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
+            categories = app.query_one(OptionList)
+            assert all(
+                str(categories.get_option_at_index(index).prompt) != "Missing Here"
+                for index in range(categories.option_count)
+            )
             assert str(app.query_one("#setup-toggle-button", Button).label) == "Remove from Auto Setup"
 
             await pilot.click("#setup-toggle-button")
@@ -224,7 +229,7 @@ def test_ctrl_p_themes_and_creator_are_persistent(monkeypatch, tmp_path) -> None
         async with first.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.3)
             assert first.has_class("theme-purple")
-            assert "Created by veer 🐧" in str(first.query_one("#creator").renderable)
+            assert "Made by VEER" in str(first.query_one("#creator").renderable)
             commands = list(first.get_system_commands(first.screen))
             theme_commands = [command for command in commands if command.title.startswith("Theme:")]
             assert {command.title.split()[1] for command in theme_commands} == {
@@ -254,7 +259,7 @@ def test_ctrl_p_themes_and_creator_are_persistent(monkeypatch, tmp_path) -> None
     asyncio.run(scenario())
 
 
-def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_path) -> None:
+def test_auto_setup_asks_before_restoring_and_no_restore_skips_it(monkeypatch, tmp_path) -> None:
     packages = _packages()[:2]
     state = StateStore(tmp_path / "state.json")
     state.set_onboarding_complete()
@@ -265,7 +270,6 @@ def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_pa
 
     async def scenario() -> None:
         restored: list[list[str]] = []
-        app = app_module.GoinfrePMApp(auto_restore=True)
 
         def fake_restore(_cancel, identifiers, **_callbacks):
             restored.append(list(identifiers))
@@ -275,12 +279,32 @@ def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_pa
                 yield ("log", f"restored {identifier}")
                 yield ("restored", identifier)
 
-        app.manager.restore = fake_restore  # type: ignore[method-assign]
-        async with app.run_test(size=(120, 36)) as pilot:
+        declined = app_module.GoinfrePMApp(auto_restore=True)
+        declined.manager.restore = fake_restore  # type: ignore[method-assign]
+        async with declined.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            assert restored == []
+            assert isinstance(declined.screen, app_module.AutoSetupPromptModal)
+            prompt = str(declined.screen.query_one("#auto-setup-prompt-items").renderable)
+            assert all(package.name in prompt for package in packages)
+            assert declined.screen.query_one("#install", Button).has_focus
+            await pilot.press("right")
+            assert declined.screen.query_one("#cancel", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause()
+            assert restored == []
+            assert "skipped for this launch" in str(declined.query_one("#operation").renderable)
+
+        accepted = app_module.GoinfrePMApp(auto_restore=True)
+        accepted.manager.restore = fake_restore  # type: ignore[method-assign]
+        async with accepted.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            assert isinstance(accepted.screen, app_module.AutoSetupPromptModal)
+            await pilot.press("enter")
             await pilot.pause(0.6)
             assert restored == [[package.identifier for package in packages]]
-            assert isinstance(app.screen, app_module.SummaryModal)
-            assert "Auto Setup restore complete" in str(app.screen.query_one(".modal-title").renderable)
+            assert isinstance(accepted.screen, app_module.SummaryModal)
+            assert "Auto Setup restore complete" in str(accepted.screen.query_one(".modal-title").renderable)
 
         skipped: list[object] = []
         no_restore = app_module.GoinfrePMApp(auto_restore=False)
@@ -288,6 +312,7 @@ def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_pa
         async with no_restore.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.5)
             assert skipped == []
+            assert not isinstance(no_restore.screen, app_module.AutoSetupPromptModal)
             assert not isinstance(no_restore.screen, app_module.SummaryModal)
 
         state.set_setup_enabled(False)
@@ -297,6 +322,7 @@ def test_auto_restore_starts_visibly_and_no_restore_skips_it(monkeypatch, tmp_pa
         async with paused.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.5)
             assert disabled == []
+            assert not isinstance(paused.screen, app_module.AutoSetupPromptModal)
             assert not isinstance(paused.screen, app_module.SummaryModal)
 
     asyncio.run(scenario())
@@ -362,6 +388,9 @@ def test_failed_restore_is_visible_for_the_current_session(monkeypatch, tmp_path
 
         app.manager.restore = failed_restore  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            assert isinstance(app.screen, app_module.AutoSetupPromptModal)
+            await pilot.press("enter")
             await pilot.pause(0.6)
             assert app.runtime_status[packages[0].identifier] == "failed"
             table = app.screen_stack[0].query_one(DataTable)
@@ -479,6 +508,16 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             doctor = narrow.screen.query_one(".doctor-modal")
             assert doctor.region.height <= 24
             assert doctor.region.width <= 80
+            await pilot.press("escape")
+            narrow.push_screen(
+                app_module.AutoSetupPromptModal(
+                    [(f"Application {index}", "not installed") for index in range(30)]
+                )
+            )
+            await pilot.pause()
+            prompt = narrow.screen.query_one(".auto-setup-prompt-modal")
+            assert prompt.region.height <= 24
+            assert prompt.region.width <= 80
             await pilot.press("escape")
             narrow.push_screen(app_module.PackageActionModal(_packages()[0], True))
             await pilot.pause()

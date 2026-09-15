@@ -11,17 +11,17 @@
   <g fill="#9b93a6" font-family="monospace" font-size="15">
     <text x="36" y="118">CATEGORIES • ACTIVE</text>
     <text x="36" y="152" fill="#f5f3f7">All</text><text x="36" y="180" fill="#c4b5fd">Auto Setup</text>
-    <text x="36" y="208">Missing Here</text><text x="36" y="236">Favorites</text>
-    <text x="36" y="264">Browsers</text><text x="36" y="292">Editors &amp; IDEs</text>
-    <text x="36" y="320">Developer Tools</text><text x="36" y="348">Installed</text><text x="36" y="390">Created by veer 🐧</text>
+    <text x="36" y="208">Favorites</text><text x="36" y="236">Browsers</text>
+    <text x="36" y="264">Editors &amp; IDEs</text><text x="36" y="292">Developer Tools</text>
+    <text x="36" y="320">Installed</text><text x="36" y="390">Made by VEER</text>
     <text x="228" y="118">PACKAGES</text><text x="228" y="144">   Name          Category       Status</text>
-    <text x="228" y="170" fill="#f5f3f7">◆★☑ Kitty         Developer      Missing here</text>
+    <text x="228" y="170" fill="#f5f3f7">◆★☑ Kitty         Developer      Not installed here</text>
     <text x="228" y="202">◆ ☐ VSCodium      Editors        Installed here</text>
     <text x="228" y="234">  ☐ Zen Browser   Browsers       Repair needed</text>
     <text x="676" y="118">DETAILS</text><text x="676" y="154" fill="#c4b5fd">Kitty</text>
     <text x="676" y="184">Fast GPU terminal</text><text x="676" y="220">Source: github</text>
-    <text x="676" y="248">Auto Setup: enabled</text><text x="676" y="276" fill="#ef6b73">Status: missing here</text>
-    <text x="36" y="452">Restoring Auto Setup — package 1 of 2: Kitty</text>
+    <text x="676" y="248">Auto Setup: startup prompt on</text><text x="676" y="276" fill="#ef6b73">Status: not installed here</text>
+    <text x="36" y="452">Ready • Auto Setup always asks before installing</text>
     <text x="36" y="492" fill="#c4b5fd">m Auto Setup   ^P Themes   c Cancel   b Basket   ? Help</text>
   </g>
 </svg>

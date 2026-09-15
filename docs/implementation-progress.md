@@ -48,7 +48,7 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - [x] Add live payload/executable/integration classification and cross-post simulations.
 - [x] Add atomic Auto Setup persistence, enable/disable controls, root-local locking, and selective restore events.
 - [x] Add explicit reinstall with rollback and safe Auto Setup-aware removal behavior.
-- [x] Add Auto Setup / Missing Here TUI sections, keyboard controls, startup restore, cancellation, and summary states.
+- [x] Add the Auto Setup TUI section, keyboard controls, startup restore, cancellation, and summary states.
 - [x] Complete documentation, release audit, isolated wheel installation smoke test, and full available validation matrix.
 
 ### Current validation
@@ -62,17 +62,18 @@ This file records recoverable checkpoints for the student-experience upgrade.
 
 ## 1.5.1 themes, privacy, and clearer labels
 
-- [x] Rename the user-facing setup labels to Auto Setup and Missing Here.
-- [x] Explain that Missing Here contains Auto Setup apps absent from the current post.
+- [x] Rename the user-facing setup label to Auto Setup and keep cross-post detection internal.
+- [x] Remove the redundant missing-app navigation section.
 - [x] Add persistent Purple, Green, Blue, Black, and Red choices to the built-in Ctrl+P palette.
 - [x] Keep the theme in the tiny roaming state while installed manifests and payloads remain in goinfre.
-- [x] Add the `Created by veer 🐧` UI credit and replace public personal-name metadata with `veer`.
+- [x] Add the `Made by VEER` UI credit and replace public personal-name metadata with `veer`.
+- [x] Ask before installing Auto Setup apps, list every app that is not ready, and provide Install now / Not now choices.
 - [x] Complete the 1.5.1 regression and release validation matrix.
 
 ### 1.5.1 validation
 
 - Release metadata is synchronized at `1.5.1`; public author metadata is `veer`.
-- 111 Python tests pass on macOS, including Ctrl+P theme discovery, theme persistence, compact roaming state, Auto Setup, cross-post classification, and 80×24 Textual pilots.
+- 111 Python tests pass on macOS, including Ctrl+P theme discovery, theme persistence, compact roaming state, the Auto Setup consent prompt, cross-post classification, and 80×24 Textual pilots.
 - Python compilation and 3.10 grammar parsing, Textual CSS parsing, shell syntax, npm tests, the intentional 28-file npm dry-run package, SVG parsing, and whitespace checks pass.
 - Bandit reports no medium/high findings, and `pip-audit` reports no known dependency vulnerabilities.
 - `shellcheck` remains unavailable locally. The Ubuntu 22.04 GUI and package-launch matrix remains a release check on a school workstation.
