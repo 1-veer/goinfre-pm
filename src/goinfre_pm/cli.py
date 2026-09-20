@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import shutil
+import os
 import sys
 
 from .branding import COMMAND, DISPLAY_NAME, SLUG, VERSION
@@ -48,6 +48,8 @@ def _emit(events: object) -> bool:
         elif kind == "package":
             identifier, index, total = value
             print(f"Restoring Auto Setup — package {index} of {total}: {identifier}")
+        elif kind == "waiting":
+            print(value)
         elif kind == "failed":
             identifier, reason = value
             print(f"Failed {identifier}: {reason}", file=sys.stderr)
@@ -70,7 +72,10 @@ def set_autostart(enabled: bool) -> None:
     state = StateStore()
     data = state.read()
     if enabled:
-        command = shutil.which(COMMAND) or str(USER_BIN / COMMAND)
+        command_path = USER_BIN / COMMAND
+        if not command_path.is_file() or not os.access(command_path, os.X_OK):
+            raise RuntimeError("Autostart needs a permanent gpm command. Run `npx goinfre-pm --install-manager` first.")
+        command = str(command_path)
         desktop_command = '"' + command.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
         AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
         content = "\n".join([

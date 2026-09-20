@@ -1,9 +1,10 @@
 # GoinfrePM
 
 GoinfrePM is a terminal package manager for Ubuntu-based 1337/42 workstations.
-It downloads and extracts large applications into writable goinfre storage and
-keeps the package-manager runtime, small state, launchers, icons, and command
-links in the home directory. It does not install system packages or require
+It downloads and extracts large applications into writable goinfre storage.
+Run-only npx launches also keep the Python environment there; only small state,
+launchers, icons, and command links remain in home storage. A permanent manager
+install is optional. It does not install system packages or require
 administrator access.
 
 Version 1.5 adds **Auto Setup**: an explicit roaming list of applications that
@@ -36,11 +37,14 @@ No large-payload fallback is silently created in ordinary home storage.
 ├── apps/       # extracted applications
 ├── downloads/  # operation-scoped temporary downloads
 ├── runtime/    # root-local install manifest and operation lock
+├── venv/       # Python environment when launched through npx
 └── logs/       # per-package logs
 ```
 
-The persistent manager lives at `~/.local/share/goinfre-pm`, and its launcher
-lives at `~/.local/bin/gpm`. Small state and desktop integration live under
+With `npx goinfre-pm`, the reusable Python environment lives at
+`<selected-root>/venv`; no permanent `gpm` command is created. If you explicitly
+install the manager, its runtime lives at `~/.local/share/goinfre-pm` and its
+launcher at `~/.local/bin/gpm`. Small state and desktop integration live under
 `~/.config/goinfre-pm`, `~/.local/share/applications`, and
 `~/.local/share/icons`. Roaming state contains only preferences such as Auto
 Setup, the selected UI theme, favorites, onboarding, and update cache. This
@@ -52,10 +56,10 @@ payload and executable are verified in the current root. Old `desired` entries
 are never silently enrolled into Auto Setup; existing users begin with an empty,
 disabled setup until they explicitly choose packages.
 
-## Quick installation with npx
+## Run with npx (no permanent manager install)
 
-After the `goinfre-pm` package has been published to npm, a peer can install or
-update the manager and immediately open it with:
+After the `goinfre-pm` package has been published to npm, a peer can open it
+without installing a permanent `gpm` command:
 
 ```sh
 npx goinfre-pm
@@ -68,8 +72,7 @@ accept that prompt non-interactively and explicitly request the newest release:
 npx --yes goinfre-pm@latest
 ```
 
-Arguments are forwarded to the installed `gpm` command, so non-interactive use
-works too:
+Arguments are forwarded to GoinfrePM, so non-interactive use works too:
 
 ```sh
 npx --yes goinfre-pm@latest doctor
@@ -87,26 +90,48 @@ npx --yes goinfre-pm@latest --no-restore
 List, search, doctor, version, and other noninteractive commands never show the
 prompt or install Auto Setup applications.
 
-The npm package contains the project files. It checks the workstation, runs the
-same idempotent `install.sh`, creates `~/.local/bin/gpm`, and then launches it.
-When the same GoinfrePM version is already installed, it skips installation and
-starts `gpm` directly. Use `--reinstall` only to force a repair of the manager:
+The npm package contains the project files. Its run-only path checks the
+workstation, creates or reuses a Python environment in the selected goinfre
+root, and launches the code from the npm package. It does **not** create
+`~/.local/bin/gpm`, write a manager runtime in `~/.local/share`, or change
+`.bashrc`, `.zshrc`, or Fish configuration. It keeps only small preferences in
+`~/.config/goinfre-pm`. npm itself may cache the small package under `~/.npm`;
+application payloads and the Python environment stay in goinfre. On a new
+post, the environment may need to be recreated, so the first launch needs
+PyPI access; later launches on the same post reuse it.
+
+To deliberately install a permanent `gpm` command, use:
 
 ```sh
-npx --yes goinfre-pm@latest --reinstall doctor
+npx --yes goinfre-pm@latest --install-manager
 ```
 
-`npx` is a bootstrap convenience, not the place where applications live. App
-payloads remain in goinfre, and the small manager remains under
-`~/.local/share/goinfre-pm`. After the first run, simply use `gpm` from any
-directory.
+That explicitly runs the idempotent installer, creates the home-based manager
+runtime and `~/.local/bin/gpm`, and adds `~/.local/bin` to Bash, Zsh, and Fish
+PATH configuration. Then `gpm` works from any directory. To repair that
+explicit installation, add `--reinstall`:
 
-To remove only the locally installed manager while retaining applications and
-state:
+```sh
+npx --yes goinfre-pm@latest --install-manager --reinstall doctor
+```
+
+Plain `npm install goinfre-pm` installs the npm wrapper into the current
+project; it does not install the Python manager or create a system-wide `gpm`.
+`npm install -g goinfre-pm` makes the npm wrapper global only when your npm
+prefix is writable, which may not be true on school machines. The explicit
+`--install-manager` option avoids that ambiguity and never needs sudo.
+
+To remove a previously installed permanent manager while retaining
+applications and state:
 
 ```sh
 npx --yes goinfre-pm@latest --uninstall-manager
 ```
+
+Upgrading from an older release does not silently remove an existing `gpm`
+launcher or its shell PATH lines; use this explicit removal command if you
+want to switch fully to run-only mode. If you enabled login autostart, disable
+it first with `npx goinfre-pm autostart disable`.
 
 ## Prerequisites
 
@@ -130,8 +155,9 @@ dpkg-deb --version
 `dpkg-deb` is optional and only needed for applications distributed as `.deb`.
 GoinfrePM and its npm bootstrap never invoke `sudo` or `apt`. If Node, Python,
 or `dpkg` is missing from a managed workstation, ask school staff to restore
-that standard Ubuntu tool. Network access to npm and PyPI is required on the
-first installation, and at least 256 MiB must be free before installation
+that standard Ubuntu tool. Network access to npm is needed when the npm package
+is not cached, and PyPI access is needed when the goinfre Python environment
+must be created or repaired. At least 256 MiB must be free before setup
 (individual applications need more).
 
 To print this list without installing GoinfrePM, run:
@@ -142,7 +168,8 @@ npx --yes goinfre-pm@latest --requirements
 
 ## Installation from a clone
 
-The npm route is optional. From a local checkout:
+The npm route is optional. From a local checkout, run without a permanent
+command using `sh install.sh run`, or explicitly install one with:
 
 ```sh
 chmod +x install.sh
@@ -167,10 +194,10 @@ GPM_INSTALL_ROOT="/path with spaces/goinfre-pm" ./install.sh
 
 Running `./install.sh` again updates the existing environment and launcher.
 
-Versions before 1.1.1 stored the manager environment in goinfre. Installing
-1.1.1 or newer creates the persistent local runtime successfully and then
-removes those obsolete goinfre runtime directories; application payloads and
-state are not removed.
+The explicit installer removes a previous goinfre-based manager environment
+only after the persistent local runtime has passed its startup check. A later
+run-only npx launch can recreate its goinfre environment. Application payloads
+and state are not removed.
 
 ## TUI controls
 
@@ -255,15 +282,23 @@ without downloading.
 
 Failures do not stop later packages. They are shown as Auto-install failed for the
 current session and may be retried on the next launch or with `gpm setup
-restore`. A root-local lock rejects concurrent install/remove/restore work.
+restore`. A root-local lock prevents overlapping changes. If another session
+(including optional login autostart) is already restoring apps, Auto Setup waits
+and then checks what is still missing; it does not report the lock as a package
+failure. You can cancel while waiting with `c`.
 
 Press `Ctrl+P` and choose **Theme: Purple**, **Green**, **Blue**, **Black**, or
-**Red**. Purple is the default. The chosen theme is stored as one short value in
-the same small roaming preferences file, so it returns after `npx goinfre-pm`
-and on another post. Package payloads and installed-state manifests are never
-moved into the quota-limited home directory for appearance customization.
+**Red**, plus **Light mode** or **Dark mode**. Purple and dark mode are the
+defaults. Both preferences are stored as short values in the same small roaming
+preferences file, so they return after `npx goinfre-pm` and on another post.
+Package payloads and installed-state manifests are never moved into the
+quota-limited home directory for appearance customization.
 
 ## Command-line interface
+
+The commands below use `gpm` after an explicit manager install. In run-only
+mode, replace `gpm` with `npx goinfre-pm` (for example,
+`npx goinfre-pm doctor`).
 
 ```text
 gpm
@@ -302,6 +337,8 @@ the next launch. The TUI offers **Remove + forget**, **Keep in Auto Setup**, and
 Cancel; CLI users can request the second behavior with `--keep-setup`.
 Configuration and cache purge remain separate explicit allowlisted options.
 Login autostart is unrelated to Auto Setup and remains disabled by default.
+It requires a real permanent `gpm` command; run-only npx users are told to
+install the manager explicitly before enabling it.
 
 ## Package catalog
 
@@ -350,12 +387,20 @@ and disabled, never executed.
 
 ## Updating and uninstalling
 
-For npm users, rerun the npx command after the maintainer publishes a new
-version. It detects the version change, updates the local manager, and preserves
-applications and state:
+For run-only users, rerun the npx command after the maintainer publishes a new
+version. It uses that package's code and reuses the goinfre Python environment
+when the pinned dependencies have not changed. It does not install or update a
+permanent `gpm` command. Applications and state are preserved:
 
 ```sh
 npx --yes goinfre-pm@latest
+```
+
+If you previously chose a permanent manager installation, update it explicitly
+after publication:
+
+```sh
+npx --yes goinfre-pm@latest --install-manager
 ```
 
 For users who installed from a clone, do not clone it again on each school
@@ -367,9 +412,10 @@ git pull --ff-only
 ./install.sh
 ```
 
-This updates the persistent local virtual environment, application code,
-catalog, and `~/.local/bin/gpm` launcher while retaining installed applications,
-Auto Setup preferences, the UI theme, and user configuration. For an existing Zen installation, first
+The explicit install updates the persistent local virtual environment,
+application code, catalog, and `~/.local/bin/gpm` launcher while retaining
+installed applications, Auto Setup preferences, the UI theme, and user
+configuration. For an existing Zen installation, first
 repair its command link without downloading it again. If it still fails, replace
 the payload from the corrected official latest-release URL:
 
@@ -398,9 +444,10 @@ sudo to add it. Existing Spotify settings and login data under
 
 ```sh
 ./install.sh uninstall
+# Or, from npm: npx goinfre-pm --uninstall-manager
 ```
 
-That removes the local manager runtime and `gpm` launcher even when goinfre is
+That removes an explicitly installed local manager runtime and `gpm` launcher even when goinfre is
 unavailable, but retains applications and state. `./install.sh uninstall
 --purge-data` also removes application
 payload directories from the selected root. Shell PATH lines and small state
@@ -439,8 +486,11 @@ commands, PATH, state, integrations, catalog validity, and architecture.
 
 - **No root found:** mount or create the campus goinfre location, then run
   `gpm path set "/your/writable/goinfre-pm"`.
-- **Command not found:** open a new shell or temporarily run
-  `export PATH="$HOME/.local/bin:$PATH"`.
+- **`gpm: command not found` after npx:** this is expected in run-only mode.
+  Use `npx goinfre-pm` again, or explicitly run
+  `npx goinfre-pm --install-manager` to create `gpm`.
+- **`gpm` missing after an explicit install:** open a new shell or temporarily
+  run `export PATH="$HOME/.local/bin:$PATH"`.
 - **A previous install says `No module named pip`:** run
   `npx --yes goinfre-pm@latest` again. Version 1.2.1 and newer detects and
   repairs the incomplete environment without sudo.

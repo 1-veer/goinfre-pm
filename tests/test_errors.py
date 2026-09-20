@@ -77,6 +77,39 @@ def test_no_restore_is_forwarded_only_to_interactive_tui(monkeypatch, tmp_path) 
     assert calls == [False]
 
 
+def test_autostart_requires_a_real_persistent_command(monkeypatch, tmp_path, capsys) -> None:
+    state = StateStore(tmp_path / "state.json")
+    monkeypatch.setattr(cli, "StateStore", lambda: state)
+    monkeypatch.setattr(cli, "AUTOSTART_DIR", tmp_path / "autostart")
+    monkeypatch.setattr(cli, "USER_BIN", tmp_path / "bin")
+    ephemeral = tmp_path / "npm-cache" / "gpm"
+    ephemeral.parent.mkdir()
+    ephemeral.write_text("#!/bin/sh\n", encoding="utf-8")
+    ephemeral.chmod(0o755)
+    monkeypatch.setenv("PATH", str(ephemeral.parent))
+
+    assert cli.main(["autostart", "enable"]) == 1
+    assert "--install-manager" in capsys.readouterr().err
+    assert state.read()["autostart"] is False
+    assert not (tmp_path / "autostart").exists()
+
+
+def test_autostart_accepts_explicit_local_manager(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    launcher = tmp_path / "bin" / "gpm"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+    launcher.chmod(0o755)
+    monkeypatch.setattr(cli, "StateStore", lambda: state)
+    monkeypatch.setattr(cli, "AUTOSTART_DIR", tmp_path / "autostart")
+    monkeypatch.setattr(cli, "USER_BIN", launcher.parent)
+
+    assert cli.main(["autostart", "enable"]) == 0
+    desktop = tmp_path / "autostart" / "goinfre-pm-restore.desktop"
+    assert f'Exec="{launcher}" restore' in desktop.read_text(encoding="utf-8")
+    assert state.read()["autostart"] is True
+
+
 def test_restore_cli_aliases_dispatch_and_report_partial_failure(monkeypatch, tmp_path, capsys) -> None:
     calls: list[str] = []
 

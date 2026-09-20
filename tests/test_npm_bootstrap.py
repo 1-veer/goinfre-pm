@@ -48,6 +48,9 @@ def test_npm_bootstrap_uses_argument_arrays_and_never_invokes_sudo() -> None:
     assert 'shell: true' not in bootstrap
     assert re.search(r'(?:run|spawnSync)\(\s*["\']sudo["\']', bootstrap) is None
     assert 'run("sh", [installer, "uninstall"]' in bootstrap
+    assert 'run("sh", [installer, "run", ...args]' in bootstrap
+    assert 'const installManager = installIndex !== -1 || forceIndex !== -1' in bootstrap
+    assert '"--install-manager"' in bootstrap
     assert "sudo apt" not in bootstrap
     assert 'works("curl"' not in bootstrap
     assert 'works("dpkg-deb"' not in bootstrap

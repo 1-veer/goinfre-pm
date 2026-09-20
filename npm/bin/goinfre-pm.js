@@ -51,8 +51,10 @@ function printRequirements() {
     `${displayName} requires the standard Ubuntu Python:`,
     "  python3 --version    # must be 3.10 or newer",
     "",
-    "No sudo, system pip, python3-venv, or curl is required. The installer creates",
-    "a private environment and bootstraps a pinned, SHA-256-verified pip wheel.",
+    "No sudo, system pip, python3-venv, or curl is required. npx runs without",
+    "creating a permanent gpm command or editing shell configuration. It keeps",
+    "the Python environment in goinfre and verifies a pinned pip wheel.",
+    "Use --install-manager only if you want a permanent gpm command.",
     "",
     "dpkg-deb is optional and only needed when installing a package distributed as .deb.",
     "If Python or dpkg-deb is missing, ask 1337/42 staff to restore the standard Ubuntu",
@@ -106,16 +108,20 @@ if (process.platform !== "linux" || process.arch !== "x64") {
   fail("This bootstrap supports x86_64 Ubuntu/Linux only. It intentionally refuses to install on this platform.");
 }
 
+const installIndex = args.indexOf("--install-manager");
 const forceIndex = args.indexOf("--reinstall");
+const installManager = installIndex !== -1 || forceIndex !== -1;
 const forceInstall = forceIndex !== -1;
-if (forceInstall) {
-  args.splice(forceIndex, 1);
-}
+if (installIndex !== -1) args.splice(installIndex, 1);
+if (forceIndex !== -1) args.splice(args.indexOf("--reinstall"), 1);
 
 const installer = path.join(packageRoot, "install.sh");
 const uninstallIndex = args.indexOf("--uninstall-manager");
 if (uninstallIndex !== -1) {
   args.splice(uninstallIndex, 1);
+  if (installManager) {
+    fail("--uninstall-manager cannot be combined with --install-manager or --reinstall.");
+  }
   if (args.length > 0) {
     fail(`--uninstall-manager cannot be combined with ${commandName} command arguments.`);
   }
@@ -130,14 +136,21 @@ if (missing.length > 0) {
   fail(`Install the missing prerequisites, then run npx ${metadata.name} again.`);
 }
 
+if (!fs.existsSync(installer)) {
+  fail("The npm package is incomplete: install.sh is missing.");
+}
+
+if (!installManager) {
+  info("Running without installing a permanent gpm command or changing shell settings.");
+  finish(run("sh", [installer, "run", ...args], { stdio: "inherit", env: process.env }), `run ${displayName}`);
+  process.exit(0);
+}
+
 const home = process.env.HOME || os.homedir();
 const launcher = path.join(home, ".local", "bin", commandName);
 const currentVersion = installedVersion(launcher);
 
 if (forceInstall || currentVersion !== metadata.version) {
-  if (!fs.existsSync(installer)) {
-    fail("The npm package is incomplete: install.sh is missing.");
-  }
   info(currentVersion
     ? `Updating the local manager from ${currentVersion} to ${metadata.version}...`
     : `Installing the local manager ${metadata.version}...`);

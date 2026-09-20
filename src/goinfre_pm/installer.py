@@ -59,6 +59,10 @@ class CleanupReport:
         return len(self.items)
 
 
+class OperationBusyError(RuntimeError):
+    """Another process currently owns this install root's operation lock."""
+
+
 def _cleanup_entry_size(path: Path) -> int:
     try:
         if path.is_symlink():
@@ -137,7 +141,7 @@ class OperationLock:
             except FileExistsError:
                 if self._remove_stale():
                     continue
-                raise RuntimeError("Another GoinfrePM operation is already active for this install root")
+                raise OperationBusyError("Another GoinfrePM operation is already active for this install root")
             payload = json.dumps({"pid": os.getpid(), "token": self.token, "created_at": time.time()})
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
@@ -149,9 +153,22 @@ class OperationLock:
 
     def _remove_stale(self) -> bool:
         try:
+            original = self.path.stat()
             value = json.loads(self.path.read_text(encoding="utf-8"))
             pid = int(value.get("pid", 0))
+        except FileNotFoundError:
+            return True
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            # A competing process may have created the file but not yet written
+            # its metadata. Never remove that fresh lock during this tiny gap.
+            try:
+                original = self.path.stat()
+                if time.time() - original.st_mtime < 5:
+                    return False
+            except FileNotFoundError:
+                return True
+            except OSError:
+                return False
             pid = 0
         if pid > 0:
             try:
@@ -162,6 +179,9 @@ class OperationLock:
             except ProcessLookupError:
                 pass
         try:
+            current = self.path.stat()
+            if (current.st_ino, current.st_mtime_ns) != (original.st_ino, original.st_mtime_ns):
+                return False
             self.path.unlink()
             return True
         except FileNotFoundError:
@@ -601,7 +621,25 @@ class PackageManager:
         raw_identifiers = self.state.read().get("setup_packages", []) if identifiers is None else identifiers
         setup = set(self.state.read().get("setup_packages", []))
         identifiers = [item for item in raw_identifiers if isinstance(item, str) and item in setup]
-        with OperationLock(self.layout):
+        lock = OperationLock(self.layout)
+        wait_started = time.monotonic()
+        waiting_reported = False
+        while True:
+            if cancel is not None and cancel.is_set():
+                for identifier in identifiers:
+                    yield ("cancelled", identifier)
+                return
+            try:
+                lock.__enter__()
+                break
+            except OperationBusyError:
+                if not waiting_reported:
+                    yield ("waiting", "Another GoinfrePM operation is using this post; waiting for it to finish")
+                    waiting_reported = True
+                if time.monotonic() - wait_started >= 30 * 60:
+                    raise RuntimeError("Another GoinfrePM operation is still active after 30 minutes; retry later")
+                time.sleep(0.5)
+        try:
             total = len(identifiers)
             for index, identifier in enumerate(identifiers, 1):
                 if cancel is not None and cancel.is_set():
@@ -643,3 +681,5 @@ class PackageManager:
                         break
                     except Exception as exc:
                         yield ("failed", (identifier, str(exc)))
+        finally:
+            lock.__exit__(None, None, None)

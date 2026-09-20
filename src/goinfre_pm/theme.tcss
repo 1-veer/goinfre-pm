@@ -165,3 +165,103 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .theme-red CommandPalette > Vertical { background: #ef4444 20%; }
 .theme-red CommandPalette #--input { border: round #ef4444; }
 .theme-red CommandList > .option-list--option-highlighted { background: #ef4444; color: #120708; }
+
+/* Textual's built-in Light mode changes its own widgets, but every custom
+   surface above also needs a light counterpart. Keep the same layout and
+   preserve the selected color theme as the accent. */
+.-light-mode Screen { background: #f6f4f9; color: #292335; }
+.-light-mode #header, .-light-mode #tasks, .-light-mode Footer { background: #eae5f0; color: #50475e; }
+.-light-mode #header { border-bottom: solid #7c3aed; }
+.-light-mode .panel { background: #fffdfd; border: round #b7a8c9; border-title-color: #655a70; }
+.-light-mode .panel:focus-within { border: heavy #7c3aed; border-title-color: #292335; }
+.-light-mode #categories OptionList, .-light-mode #package-table,
+.-light-mode #auto-setup-prompt-list, .-light-mode .packs-modal OptionList,
+.-light-mode .sort-modal OptionList, .-light-mode .doctor-modal DataTable {
+    background: #fffdfd;
+    color: #292335;
+}
+.-light-mode #categories OptionList > .option-list--option-highlighted,
+.-light-mode #package-table > .datatable--cursor { background: #e7d8f7; color: #292335; }
+.-light-mode #categories OptionList:focus > .option-list--option-highlighted,
+.-light-mode #package-table:focus > .datatable--cursor { background: #7c3aed; color: #ffffff; text-style: bold; }
+.-light-mode #brand, .-light-mode #basket-status, .-light-mode #operation,
+.-light-mode #details-title, .-light-mode .modal-title { color: #5b21a1; }
+.-light-mode #storage, .-light-mode #creator, .-light-mode #details-body,
+.-light-mode #logs, .-light-mode .modal-copy, .-light-mode .packs-modal #pack-details { color: #51475f; }
+.-light-mode #details { color: #292335; }
+.-light-mode #creator, .-light-mode #tasks { border-top: solid #b7a8c9; }
+.-light-mode #progress { color: #7c3aed; }
+.-light-mode #logs { background: #f6f4f9; }
+.-light-mode #search, .-light-mode .modal { background: #fffdfd; color: #292335; border: round #7c3aed; }
+.-light-mode #splash { background: #f6f4f9; color: #5b21a1; }
+.-light-mode ModalScreen { background: rgba(41, 35, 53, 0.35); }
+.-light-mode Button.-primary { background: #7c3aed; color: #ffffff; }
+.-light-mode Button.-default { background: #e3dce9; color: #292335; }
+.-light-mode CommandPalette > Vertical { background: #fffdfd; }
+.-light-mode CommandPalette #--input { border: round #7c3aed; background: #fffdfd; color: #292335; }
+.-light-mode CommandList { background: #fffdfd; color: #292335; }
+.-light-mode CommandList > .option-list--option-highlighted { background: #7c3aed; color: #ffffff; }
+
+.-light-mode.theme-green #header, .-light-mode.theme-green #tasks, .-light-mode.theme-green Footer { background: #e5f1e8; }
+.-light-mode.theme-green .panel { border: round #a4c7ad; }
+.-light-mode.theme-green #header { border-bottom: solid #16803b; }
+.-light-mode.theme-green .panel:focus-within { border: heavy #16803b; }
+.-light-mode.theme-green #categories OptionList > .option-list--option-highlighted,
+.-light-mode.theme-green #package-table > .datatable--cursor { background: #d6efdc; color: #243429; }
+.-light-mode.theme-green #categories OptionList:focus > .option-list--option-highlighted,
+.-light-mode.theme-green #package-table:focus > .datatable--cursor { background: #16803b; color: #ffffff; }
+.-light-mode.theme-green #brand, .-light-mode.theme-green #basket-status,
+.-light-mode.theme-green #operation, .-light-mode.theme-green #details-title,
+.-light-mode.theme-green .modal-title { color: #116329; }
+.-light-mode.theme-green #progress { color: #16803b; }
+.-light-mode.theme-green #search, .-light-mode.theme-green .modal { border: round #16803b; }
+.-light-mode.theme-green CommandPalette #--input { border: round #16803b; }
+.-light-mode.theme-green Button.-primary, .-light-mode.theme-green CommandList > .option-list--option-highlighted { background: #16803b; color: #ffffff; }
+
+.-light-mode.theme-blue #header, .-light-mode.theme-blue #tasks, .-light-mode.theme-blue Footer { background: #e5edf9; }
+.-light-mode.theme-blue .panel { border: round #aabedb; }
+.-light-mode.theme-blue #header { border-bottom: solid #2563bb; }
+.-light-mode.theme-blue .panel:focus-within { border: heavy #2563bb; }
+.-light-mode.theme-blue #categories OptionList > .option-list--option-highlighted,
+.-light-mode.theme-blue #package-table > .datatable--cursor { background: #dce9fb; color: #253347; }
+.-light-mode.theme-blue #categories OptionList:focus > .option-list--option-highlighted,
+.-light-mode.theme-blue #package-table:focus > .datatable--cursor { background: #2563bb; color: #ffffff; }
+.-light-mode.theme-blue #brand, .-light-mode.theme-blue #basket-status,
+.-light-mode.theme-blue #operation, .-light-mode.theme-blue #details-title,
+.-light-mode.theme-blue .modal-title { color: #174d96; }
+.-light-mode.theme-blue #progress { color: #2563bb; }
+.-light-mode.theme-blue #search, .-light-mode.theme-blue .modal { border: round #2563bb; }
+.-light-mode.theme-blue CommandPalette #--input { border: round #2563bb; }
+.-light-mode.theme-blue Button.-primary, .-light-mode.theme-blue CommandList > .option-list--option-highlighted { background: #2563bb; color: #ffffff; }
+
+.-light-mode.theme-black #header, .-light-mode.theme-black #tasks, .-light-mode.theme-black Footer { background: #e8e8e8; }
+.-light-mode.theme-black .panel { border: round #a9a9a9; }
+.-light-mode.theme-black #header { border-bottom: solid #404040; }
+.-light-mode.theme-black .panel:focus-within { border: heavy #404040; }
+.-light-mode.theme-black #categories OptionList > .option-list--option-highlighted,
+.-light-mode.theme-black #package-table > .datatable--cursor { background: #e1e1e1; color: #242424; }
+.-light-mode.theme-black #categories OptionList:focus > .option-list--option-highlighted,
+.-light-mode.theme-black #package-table:focus > .datatable--cursor { background: #404040; color: #ffffff; }
+.-light-mode.theme-black #brand, .-light-mode.theme-black #basket-status,
+.-light-mode.theme-black #operation, .-light-mode.theme-black #details-title,
+.-light-mode.theme-black .modal-title { color: #303030; }
+.-light-mode.theme-black #progress { color: #404040; }
+.-light-mode.theme-black #search, .-light-mode.theme-black .modal { border: round #404040; }
+.-light-mode.theme-black CommandPalette #--input { border: round #404040; }
+.-light-mode.theme-black Button.-primary, .-light-mode.theme-black CommandList > .option-list--option-highlighted { background: #404040; color: #ffffff; }
+
+.-light-mode.theme-red #header, .-light-mode.theme-red #tasks, .-light-mode.theme-red Footer { background: #f8e9e9; }
+.-light-mode.theme-red .panel { border: round #dbb3b3; }
+.-light-mode.theme-red #header { border-bottom: solid #b72e36; }
+.-light-mode.theme-red .panel:focus-within { border: heavy #b72e36; }
+.-light-mode.theme-red #categories OptionList > .option-list--option-highlighted,
+.-light-mode.theme-red #package-table > .datatable--cursor { background: #f8dddd; color: #3b2729; }
+.-light-mode.theme-red #categories OptionList:focus > .option-list--option-highlighted,
+.-light-mode.theme-red #package-table:focus > .datatable--cursor { background: #b72e36; color: #ffffff; }
+.-light-mode.theme-red #brand, .-light-mode.theme-red #basket-status,
+.-light-mode.theme-red #operation, .-light-mode.theme-red #details-title,
+.-light-mode.theme-red .modal-title { color: #92222b; }
+.-light-mode.theme-red #progress { color: #b72e36; }
+.-light-mode.theme-red #search, .-light-mode.theme-red .modal { border: round #b72e36; }
+.-light-mode.theme-red CommandPalette #--input { border: round #b72e36; }
+.-light-mode.theme-red Button.-primary, .-light-mode.theme-red CommandList > .option-list--option-highlighted { background: #b72e36; color: #ffffff; }

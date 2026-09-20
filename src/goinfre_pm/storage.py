@@ -17,6 +17,8 @@ SETTINGS_FILE = CONFIG_DIR / "config.json"
 STATE_FILE = CONFIG_DIR / "state.json"
 UI_THEMES = ("purple", "green", "blue", "black", "red")
 DEFAULT_UI_THEME = "purple"
+UI_MODES = ("dark", "light")
+DEFAULT_UI_MODE = "dark"
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,8 @@ class StateStore:
                     data["update_cache"] = {}
                 if data.get("theme") not in UI_THEMES:
                     data["theme"] = DEFAULT_UI_THEME
+                if data.get("mode") not in UI_MODES:
+                    data["mode"] = DEFAULT_UI_MODE
                 if not isinstance(data.get("legacy_installed"), dict):
                     data["legacy_installed"] = {}
                 if not isinstance(data.get("legacy_desired"), list):
@@ -197,6 +201,7 @@ class StateStore:
             "onboarding_complete": False,
             "update_cache": {},
             "theme": DEFAULT_UI_THEME,
+            "mode": DEFAULT_UI_MODE,
             "legacy_installed": {},
             "legacy_desired": [],
             "legacy_migration_pending": False,
@@ -277,6 +282,14 @@ class StateStore:
         with self._lock:
             data = self.read()
             data["theme"] = theme
+            self.write(data)
+
+    def set_mode(self, mode: str) -> None:
+        if mode not in UI_MODES:
+            raise ValueError(f"Unknown UI mode: {mode}")
+        with self._lock:
+            data = self.read()
+            data["mode"] = mode
             self.write(data)
 
 

@@ -8,6 +8,7 @@ from goinfre_pm.installer import PackageManager
 from goinfre_pm.models import InstalledPackage, Package
 from goinfre_pm.storage import (
     DEFAULT_UI_THEME,
+    DEFAULT_UI_MODE,
     UI_THEMES,
     Layout,
     LocalStateStore,
@@ -55,6 +56,7 @@ def test_new_roaming_state_does_not_claim_installations_or_enable_setup(tmp_path
     assert data["setup_packages"] == []
     assert data["setup_enabled"] is False
     assert data["theme"] == DEFAULT_UI_THEME
+    assert data["mode"] == DEFAULT_UI_MODE
     assert "installed" not in data
 
 
@@ -72,6 +74,22 @@ def test_theme_preference_is_tiny_validated_and_persistent(tmp_path: Path) -> No
     data["theme"] = "invalid"
     store.write(data)
     assert store.read()["theme"] == DEFAULT_UI_THEME
+
+
+def test_light_mode_preference_is_tiny_validated_and_persistent(tmp_path: Path) -> None:
+    path = tmp_path / "state.json"
+    store = StateStore(path)
+    store.set_mode("light")
+    assert store.read()["mode"] == "light"
+    assert path.stat().st_size < 4096
+    store.set_mode("dark")
+    assert store.read()["mode"] == "dark"
+    with pytest.raises(ValueError, match="Unknown UI mode"):
+        store.set_mode("sepia")
+    data = store.read()
+    data["mode"] = "invalid"
+    store.write(data)
+    assert store.read()["mode"] == DEFAULT_UI_MODE
 
 
 def test_my_setup_add_remove_and_enable_are_atomic(tmp_path: Path) -> None:

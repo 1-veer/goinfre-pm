@@ -1,4 +1,8 @@
 from pathlib import Path
+import hashlib
+import json
+import os
+import subprocess
 
 
 def test_launcher_uses_persistent_local_runtime() -> None:
@@ -29,3 +33,86 @@ def test_manager_update_preserves_root_local_installation_manifest() -> None:
     assert 'rm -rf "$GPM_ROOT/venv" "$GPM_ROOT/runtime"' not in installer
     assert 'rm -f "$GPM_ROOT/runtime/packages.toml" "$GPM_ROOT/runtime/project.conf"' in installer
     assert 'Refusing symlinked storage directory' in installer
+
+
+def _fake_venv_python(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '#!/bin/sh\n'
+        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 0; fi\n'
+        'if [ "$1" = "-c" ]; then exit 0; fi\n'
+        'if [ -n "${GPM_TEST_RUN_LOG:-}" ]; then\n'
+        '  printf "%s\\n" "$@" > "$GPM_TEST_RUN_LOG"\n'
+        '  printf "packages=%s\\n" "$GPM_PACKAGES_FILE" >> "$GPM_TEST_RUN_LOG"\n'
+        '  printf "pythonpath=%s\\n" "$PYTHONPATH" >> "$GPM_TEST_RUN_LOG"\n'
+        'fi\n',
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_npx_run_mode_keeps_python_in_goinfre_without_creating_gpm(tmp_path: Path) -> None:
+    project = Path(__file__).parents[1]
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".zshrc").write_text("# user's existing shell settings\n", encoding="utf-8")
+    root = tmp_path / "goinfre with spaces" / "goinfre-pm"
+    python = root / "venv" / "bin" / "python"
+    _fake_venv_python(python)
+    digest = hashlib.sha256((project / "requirements.txt").read_bytes()).hexdigest()
+    (root / "venv" / ".gpm-requirements.sha256").write_text(digest + "\n", encoding="ascii")
+    log = tmp_path / "run.log"
+    env = {**os.environ, "HOME": str(home), "GPM_INSTALL_ROOT": "goinfre with spaces/goinfre-pm", "GPM_TEST_RUN_LOG": str(log)}
+
+    result = subprocess.run(["sh", str(project / "install.sh"), "run", "list"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    assert (root / "venv").is_dir()
+    assert not (home / ".local" / "bin" / "gpm").exists()
+    assert not (home / ".local" / "share" / "goinfre-pm").exists()
+    assert (home / ".zshrc").read_text(encoding="utf-8") == "# user's existing shell settings\n"
+    assert not (home / ".bashrc").exists()
+    assert not (home / ".config" / "fish" / "config.fish").exists()
+    assert json.loads((home / ".config" / "goinfre-pm" / "config.json").read_text())["install_root"] == str(root)
+    assert log.read_text().splitlines()[:3] == ["-m", "goinfre_pm", "list"]
+    assert f"packages={project / 'packages.toml'}" in log.read_text()
+    assert f"pythonpath={project / 'src'}" in log.read_text()
+
+
+def test_explicit_installer_still_creates_persistent_gpm(tmp_path: Path) -> None:
+    project = Path(__file__).parents[1]
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "goinfre with spaces" / "goinfre-pm"
+    _fake_venv_python(home / ".local" / "share" / "goinfre-pm" / "venv" / "bin" / "python")
+    env = {**os.environ, "HOME": str(home), "GPM_INSTALL_ROOT": str(root)}
+
+    result = subprocess.run(["sh", str(project / "install.sh")], env=env, capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    assert (home / ".local" / "bin" / "gpm").is_file()
+    assert (home / ".local" / "share" / "goinfre-pm" / "venv").is_dir()
+    assert "# Goinfre package manager PATH" in (home / ".zshrc").read_text()
+
+
+def test_run_mode_never_interprets_forwarded_uninstall_as_manager_removal(tmp_path: Path) -> None:
+    project = Path(__file__).parents[1]
+    home = tmp_path / "home"
+    home.mkdir()
+    old_launcher = home / ".local" / "bin" / "gpm"
+    old_launcher.parent.mkdir(parents=True)
+    old_launcher.write_text("keep", encoding="utf-8")
+    old_runtime = home / ".local" / "share" / "goinfre-pm" / "keep"
+    old_runtime.parent.mkdir(parents=True)
+    old_runtime.write_text("keep", encoding="utf-8")
+    root = tmp_path / "goinfre-pm"
+    _fake_venv_python(root / "venv" / "bin" / "python")
+    digest = hashlib.sha256((project / "requirements.txt").read_bytes()).hexdigest()
+    (root / "venv" / ".gpm-requirements.sha256").write_text(digest + "\n", encoding="ascii")
+    env = {**os.environ, "HOME": str(home), "GPM_INSTALL_ROOT": str(root)}
+
+    result = subprocess.run(["sh", str(project / "install.sh"), "run", "uninstall"], env=env, capture_output=True, text=True, timeout=30)
+
+    assert result.returncode == 0, result.stderr
+    assert old_launcher.read_text(encoding="utf-8") == "keep"
+    assert old_runtime.read_text(encoding="utf-8") == "keep"

@@ -204,7 +204,7 @@ class HelpModal(ModalScreen[None]):
                 "a select visible\n"
                 "m toggle Auto Setup   M add selection   c cancel operation\n"
                 "t Starter Packs   f favorite   s sort   d Doctor\n"
-                "/ search   p path   ^P themes   l logs   w welcome   ? help   q/Esc back"
+                "/ search   p path   ^P themes/mode   l logs   w welcome   ? help   q/Esc back"
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Close", variant="primary", id="close")
@@ -565,6 +565,7 @@ class GoinfrePMApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.dark = self.state.read()["mode"] == "dark"
         self.set_ui_theme(self.ui_theme, persist=False)
         table = self.query_one(DataTable)
         table.add_columns("", "Package", "Category", "Status", "Source", "Version")
@@ -601,6 +602,12 @@ class GoinfrePMApp(App[None]):
         if persist:
             self.state.set_theme(theme)
             self.notify(f"{theme.title()} theme saved for future sessions")
+
+    def action_toggle_dark(self) -> None:
+        self.dark = not self.dark
+        mode = "dark" if self.dark else "light"
+        self.state.set_mode(mode)
+        self.notify(f"{mode.title()} mode saved for future sessions")
 
     def _finish_startup(self) -> None:
         if self.startup_finished:
@@ -1293,7 +1300,10 @@ class GoinfrePMApp(App[None]):
                 ) if current[0] is not None else None,
             )
             for kind, value in events:
-                if kind == "package":
+                if kind == "waiting":
+                    self.call_from_thread(self.query_one("#operation", Static).update, str(value))
+                    self.call_from_thread(self.query_one(RichLog).write, str(value))
+                elif kind == "package":
                     identifier, index, total = value  # type: ignore[misc]
                     package = by_identifier.get(str(identifier))
                     if package:

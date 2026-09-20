@@ -1,11 +1,13 @@
 from pathlib import Path
+import os
 import threading
+import time
 
 import pytest
 
 from goinfre_pm import integration
 from goinfre_pm.downloader import DownloadCancelled
-from goinfre_pm.installer import OperationLock, PackageManager
+from goinfre_pm.installer import InstallationCheck, OperationLock, PackageManager
 from goinfre_pm.models import InstalledPackage, Package
 from goinfre_pm.storage import Layout, StateStore
 
@@ -307,3 +309,74 @@ def test_root_local_operation_lock_rejects_overlap(tmp_path: Path) -> None:
             with OperationLock(layout):
                 pass
     assert not (layout.runtime / "operation.lock").exists()
+
+
+def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatch, tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+    installed = False
+    monkeypatch.setattr(manager, "installation", lambda _identifier: InstallationCheck("installed" if installed else "missing"))
+    monkeypatch.setattr(manager, "_install", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("downloaded twice")))
+    waiting = threading.Event()
+    events: list[tuple[str, object]] = []
+
+    def restore() -> None:
+        for event in manager.restore():
+            events.append(event)
+            if event[0] == "waiting":
+                waiting.set()
+
+    with OperationLock(manager.layout):
+        thread = threading.Thread(target=restore)
+        thread.start()
+        assert waiting.wait(2)
+        assert not any(kind == "failed" for kind, _value in events)
+        installed = True
+    thread.join(3)
+    assert not thread.is_alive()
+    assert ("skipped", ("tool", "already installed here")) in events
+
+
+def test_restore_can_cancel_while_waiting_for_other_session(tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+    cancelled = threading.Event()
+    waiting = threading.Event()
+    events: list[tuple[str, object]] = []
+
+    def restore() -> None:
+        for event in manager.restore(cancelled):
+            events.append(event)
+            if event[0] == "waiting":
+                waiting.set()
+
+    with OperationLock(manager.layout):
+        thread = threading.Thread(target=restore)
+        thread.start()
+        assert waiting.wait(2)
+        cancelled.set()
+        thread.join(3)
+        assert not thread.is_alive()
+    assert ("cancelled", "tool") in events
+    assert not any(kind == "failed" for kind, _value in events)
+
+
+def test_new_lock_without_metadata_is_not_mistaken_for_stale(tmp_path: Path) -> None:
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    layout.create()
+    lock_file = layout.runtime / "operation.lock"
+    lock_file.touch()
+    with pytest.raises(RuntimeError, match="already active"):
+        with OperationLock(layout):
+            pass
+    assert lock_file.exists()
+    old = time.time() - 10
+    lock_file.touch()
+    os.utime(lock_file, (old, old))
+    with OperationLock(layout):
+        pass
+    assert not lock_file.exists()

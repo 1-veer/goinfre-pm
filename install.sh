@@ -1,5 +1,6 @@
 #!/bin/sh
-# Safe, idempotent installer. The manager persists locally; app payloads use goinfre.
+# Safe, idempotent installer. "run" keeps the manager environment in goinfre;
+# the default explicit install keeps a persistent command in the user's home.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -7,6 +8,12 @@ BRANDING_FILE="$SCRIPT_DIR/src/goinfre_pm/project.conf"
 [ -f "$BRANDING_FILE" ] || { printf '%s\n' "Missing project branding configuration: $BRANDING_FILE" >&2; exit 1; }
 # project.conf contains only maintainer-controlled single-quoted assignments.
 . "$BRANDING_FILE"
+
+RUN_ONCE=0
+if [ "${1:-}" = "run" ]; then
+    RUN_ONCE=1
+    shift
+fi
 
 if [ -t 1 ]; then
     VIOLET='\033[38;5;141m'; GREEN='\033[0;32m'; RED='\033[0;31m'; AMBER='\033[0;33m'; BOLD='\033[1m'; RESET='\033[0m'
@@ -26,7 +33,7 @@ MANAGER_RUNTIME=$MANAGER_HOME/runtime
 
 # Removing the local manager must still work if goinfre or a system extraction
 # tool is unavailable. Application data and state are deliberately retained.
-if [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
+if [ "$RUN_ONCE" = "0" ] && [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
     info "Removing the local package-manager runtime; application payloads and state are retained."
     rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
     rm -rf "$MANAGER_HOME"
@@ -173,11 +180,22 @@ choose_root() {
 }
 
 choose_root
+GPM_ROOT=$(CDPATH= cd -- "$GPM_ROOT" && pwd -P) || die "Could not resolve the selected goinfre path."
 case "$GPM_ROOT" in
     /|"$HOME") die "Refusing unsafe installation root: $GPM_ROOT" ;;
 esac
 
-if [ "${1:-}" = "uninstall" ]; then
+# An npx launch never creates a permanent command or modifies shell startup
+# files. Its reusable private Python environment stays on this post's goinfre.
+if [ "$RUN_ONCE" = "1" ]; then
+    MANAGER_VENV=$GPM_ROOT/venv
+    MANAGER_RUNTIME=$GPM_ROOT/runtime
+    PIP_BOOTSTRAP_DIR=$MANAGER_RUNTIME/bootstrap
+    PIP_BOOTSTRAP_WHEEL=$PIP_BOOTSTRAP_DIR/pip-$PIP_BOOTSTRAP_VERSION-py3-none-any.whl
+    [ ! -L "$MANAGER_VENV" ] || die "Refusing a symlinked goinfre Python environment: $MANAGER_VENV"
+fi
+
+if [ "$RUN_ONCE" = "0" ] && [ "${1:-}" = "uninstall" ]; then
     info "Removing the manager and explicitly purging goinfre application data."
     rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
     rm -rf "$MANAGER_HOME"
@@ -201,10 +219,36 @@ info "Available space: $((FREE_KB / 1024)) MiB"
 mkdir -p "$MANAGER_RUNTIME"
 
 if [ ! -x "$MANAGER_VENV/bin/python" ]; then
-    info "Creating persistent Python environment in $MANAGER_VENV"
+    info "Creating private Python environment in $MANAGER_VENV"
     python3 -m venv --without-pip "$MANAGER_VENV" || die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
 fi
 ensure_private_pip
+
+save_root() {
+    mkdir -p "$HOME/.config/$PROJECT_SLUG" || die "Cannot create the small settings directory in your home."
+    python3 -c 'import json,os,sys,tempfile; target=sys.argv[1]; fd,tmp=tempfile.mkstemp(prefix=".config.", dir=os.path.dirname(target)); f=os.fdopen(fd,"w",encoding="utf-8"); json.dump({"install_root":sys.argv[2]},f,indent=2); f.write("\n"); f.close(); os.replace(tmp,target)' "$HOME/.config/$PROJECT_SLUG/config.json" "$GPM_ROOT" \
+        || die "Could not save the selected goinfre path in your home settings. Check write permissions."
+}
+
+if [ "$RUN_ONCE" = "1" ]; then
+    REQUIREMENTS_HASH=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$SCRIPT_DIR/requirements.txt")
+    REQUIREMENTS_MARKER=$MANAGER_VENV/.gpm-requirements.sha256
+    if [ ! -f "$REQUIREMENTS_MARKER" ] || [ "$(sed -n '1p' "$REQUIREMENTS_MARKER")" != "$REQUIREMENTS_HASH" ] \
+        || ! "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1 \
+        || ! "$MANAGER_VENV/bin/python" -m pip check >/dev/null 2>&1; then
+        info "Installing pinned Python dependencies in goinfre"
+        rm -f "$REQUIREMENTS_MARKER"
+        "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" \
+            || die "Could not install Python dependencies in goinfre. Check the network and retry."
+        printf '%s\n' "$REQUIREMENTS_HASH" > "$REQUIREMENTS_MARKER"
+    fi
+    save_root
+    GPM_PACKAGES_FILE=${GPM_PACKAGES_FILE:-$SCRIPT_DIR/packages.toml}
+    PYTHONPATH=$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}
+    export GPM_PACKAGES_FILE PYTHONPATH
+    exec "$MANAGER_VENV/bin/python" -m "$PROJECT_MODULE" "$@"
+fi
 
 info "Installing pinned dependencies and project files"
 if ! "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
@@ -220,8 +264,8 @@ fi
 
 cp "$SCRIPT_DIR/packages.toml" "$MANAGER_RUNTIME/packages.toml"
 cp "$BRANDING_FILE" "$MANAGER_RUNTIME/project.conf"
-mkdir -p "$HOME/.config/$PROJECT_SLUG" "$HOME/.local/bin"
-python3 -c 'import json,os,sys,tempfile; target=sys.argv[1]; fd,tmp=tempfile.mkstemp(prefix=".config.", dir=os.path.dirname(target)); f=os.fdopen(fd,"w",encoding="utf-8"); json.dump({"install_root":sys.argv[2]},f,indent=2); f.write("\n"); f.close(); os.replace(tmp,target)' "$HOME/.config/$PROJECT_SLUG/config.json" "$GPM_ROOT"
+save_root
+mkdir -p "$HOME/.local/bin"
 
 LAUNCHER=$HOME/.local/bin/$PROJECT_COMMAND
 {

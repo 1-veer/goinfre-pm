@@ -268,6 +268,62 @@ def test_ctrl_p_themes_and_creator_are_persistent(monkeypatch, tmp_path) -> None
     asyncio.run(scenario())
 
 
+def test_light_mode_colors_entire_app_and_persists(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", _packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        first = app_module.GoinfrePMApp(auto_restore=False)
+        async with first.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            assert first.dark
+            assert first.query_one("#catalog").styles.background.hex.lower() == "#171120"
+            first.action_toggle_dark()
+            await pilot.pause()
+            assert not first.dark
+            assert first.has_class("-light-mode")
+            assert state.read()["mode"] == "light"
+            assert any(command.title == "Dark mode" for command in first.get_system_commands(first.screen))
+            for selector in ("#header", "#catalog", "#package-table", "#details", "#tasks", "#logs"):
+                assert first.query_one(selector).styles.background.hex.lower() not in {"#171120", "#21172d", "#0d0914"}
+            assert first.query_one("#catalog").styles.background.hex.lower() == "#fffdfd"
+            assert first.query_one("#tasks").styles.background.hex.lower() == "#eae5f0"
+
+            first.push_screen(app_module.ConfirmModal("Test", "Light modal"))
+            await pilot.pause()
+            assert first.screen.query_one(".modal").styles.background.hex.lower() == "#fffdfd"
+            await pilot.press("escape")
+            light_headers = {
+                "green": "#e5f1e8",
+                "blue": "#e5edf9",
+                "black": "#e8e8e8",
+                "red": "#f8e9e9",
+                "purple": "#eae5f0",
+            }
+            for theme, header_color in light_headers.items():
+                first.set_ui_theme(theme)
+                await pilot.pause()
+                assert first.query_one("#catalog").styles.background.hex.lower() == "#fffdfd"
+                assert first.query_one("#header").styles.background.hex.lower() == header_color
+
+        second = app_module.GoinfrePMApp(auto_restore=False)
+        async with second.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            assert not second.dark
+            assert second.query_one("#catalog").styles.background.hex.lower() == "#fffdfd"
+            second.action_toggle_dark()
+            await pilot.pause()
+            assert second.dark
+            assert state.read()["mode"] == "dark"
+            assert any(command.title == "Light mode" for command in second.get_system_commands(second.screen))
+            assert second.query_one("#catalog").styles.background.hex.lower() == "#171120"
+
+    asyncio.run(scenario())
+
+
 def test_auto_setup_asks_before_restoring_and_no_restore_skips_it(monkeypatch, tmp_path) -> None:
     packages = _packages()[:2]
     state = StateStore(tmp_path / "state.json")
