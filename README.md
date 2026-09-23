@@ -465,8 +465,10 @@ are deliberately retained for safety and possible reinstall.
   a valid executable inside the selected root. Roaming home preferences cannot
   claim an application is installed.
 - A root-local exclusive operation lock prevents two manager processes from
-  mutating the same payload tree concurrently; stale locks are recovered only
-  after their owning process is gone.
+  mutating the same payload tree concurrently. Lock metadata includes the
+  workstation and Linux boot identity so a lock carried through goinfre from
+  an older post cannot be confused with an unrelated process that reused its
+  PID.
 - Application removal only targets the exact validated app directory and
   manager-owned integration filenames. Configuration purge needs an explicit
   CLI flag, package opt-in, and an allowlisted path that clearly matches the

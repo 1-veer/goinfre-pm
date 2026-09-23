@@ -19,7 +19,7 @@ from .config import load_packages
 from .doctor import DoctorCheck, collect_doctor_checks
 from .errors import error_text, write_crash_log
 from .experience import STARTER_PACKS, StarterPack, apply_starter_pack, estimate_basket, human_size, sort_packages
-from .installer import PackageManager
+from .installer import OperationBusyError, PackageManager
 from .models import Package
 from .storage import (
     DEFAULT_UI_THEME,
@@ -288,6 +288,40 @@ class AutoSetupPromptModal(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "install")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class AutoSetupBusyModal(ModalScreen[bool]):
+    """Offer a calm retry when another real payload operation lasts too long."""
+
+    BINDINGS = [Binding("escape", "cancel", "Not now", show=False)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal auto-setup-prompt-modal"):
+            yield Label("Auto Setup is still preparing", classes="modal-title")
+            yield Static(
+                "GoinfrePM is finishing another task on this post. Nothing failed and no "
+                "application was marked as installed. You can retry now or continue without "
+                "changing anything.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Retry", variant="primary", id="retry")
+                yield Button("Not now", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#retry", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "retry")
 
     def action_cancel(self) -> None:
         self.dismiss(False)
@@ -661,6 +695,25 @@ class GoinfrePMApp(App[None]):
         self.busy = True
         self.cancel_event = threading.Event()
         self._restore_worker(pending)
+
+    def _show_auto_setup_retry(self, packages: list[Package]) -> None:
+        self.push_screen(
+            AutoSetupBusyModal(),
+            lambda accepted: self._retry_auto_setup(packages, accepted),
+        )
+
+    def _retry_auto_setup(self, packages: list[Package], accepted: bool) -> None:
+        if not accepted:
+            self.query_one("#operation", Static).update("Auto Setup postponed for this launch")
+            self.query_one(RichLog).write("Auto Setup was postponed; no application files were changed.")
+            return
+        if self.busy:
+            self.notify("An operation is already running", severity="warning")
+            return
+        self.busy = True
+        self.cancel_event = threading.Event()
+        self.query_one("#operation", Static).update("Preparing your Auto Setup…")
+        self._restore_worker(packages)
 
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
@@ -1288,6 +1341,7 @@ class GoinfrePMApp(App[None]):
         failed: list[tuple[Package, str]] = []
         skipped: list[tuple[Package, str]] = []
         current: list[Package | None] = [None]
+        retry_needed = False
         try:
             events = self.manager.restore(
                 self.cancel_event,
@@ -1343,6 +1397,12 @@ class GoinfrePMApp(App[None]):
                     if package:
                         self.runtime_status.pop(package.identifier, None)
                         skipped.append((package, "cancelled"))
+        except OperationBusyError:
+            retry_needed = True
+            self.call_from_thread(
+                self.query_one(RichLog).write,
+                "Auto Setup is still preparing. Choose Retry when the current task finishes.",
+            )
         except Exception as exc:
             message = error_text(exc)
             for package in packages:
@@ -1355,7 +1415,10 @@ class GoinfrePMApp(App[None]):
             self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
             self.call_from_thread(self._refresh)
             elapsed = time.monotonic() - started
-            self.call_from_thread(self._show_summary, succeeded, failed, "restore", elapsed, skipped)
+            if retry_needed:
+                self.call_from_thread(self._show_auto_setup_retry, packages)
+            else:
+                self.call_from_thread(self._show_summary, succeeded, failed, "restore", elapsed, skipped)
 
     def _show_transfer(self, package: Package, done: int, total: int | None, speed: float, eta: float | None) -> None:
         amount = human_size(done)

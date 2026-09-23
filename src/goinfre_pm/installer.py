@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import json
 import os
+import socket
 import shutil
 import stat
 import subprocess
@@ -61,6 +62,14 @@ class CleanupReport:
 
 class OperationBusyError(RuntimeError):
     """Another process currently owns this install root's operation lock."""
+
+
+def _current_boot_id() -> str:
+    """Return a Linux boot identifier so roaming goinfre locks are post-local."""
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def _cleanup_entry_size(path: Path) -> int:
@@ -131,6 +140,8 @@ class OperationLock:
     def __init__(self, layout: Layout) -> None:
         self.path = layout.runtime / "operation.lock"
         self.token = uuid.uuid4().hex
+        self.hostname = socket.gethostname()
+        self.boot_id = _current_boot_id()
         self.acquired = False
 
     def __enter__(self) -> "OperationLock":
@@ -142,7 +153,15 @@ class OperationLock:
                 if self._remove_stale():
                     continue
                 raise OperationBusyError("Another GoinfrePM operation is already active for this install root")
-            payload = json.dumps({"pid": os.getpid(), "token": self.token, "created_at": time.time()})
+            payload = json.dumps(
+                {
+                    "pid": os.getpid(),
+                    "token": self.token,
+                    "created_at": time.time(),
+                    "hostname": self.hostname,
+                    "boot_id": self.boot_id,
+                }
+            )
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(payload)
                 handle.flush()
@@ -170,7 +189,34 @@ class OperationLock:
             except OSError:
                 return False
             pid = 0
-        if pid > 0:
+            value = {}
+
+        recorded_hostname = str(value.get("hostname", ""))
+        recorded_boot_id = str(value.get("boot_id", ""))
+        try:
+            created_at = float(value.get("created_at", 0))
+        except (TypeError, ValueError):
+            created_at = 0
+
+        # Goinfre follows the user between school posts, but PIDs do not. A
+        # lock from a different hostname or Linux boot is always stale even if
+        # an unrelated process on this post happens to reuse the same PID.
+        different_post = bool(
+            recorded_hostname
+            and self.hostname
+            and recorded_hostname != self.hostname
+            or recorded_boot_id
+            and self.boot_id
+            and recorded_boot_id != self.boot_id
+        )
+        legacy_lock_expired = bool(
+            not recorded_hostname
+            and not recorded_boot_id
+            and created_at > 0
+            and time.time() - created_at >= 2 * 60 * 60
+        )
+
+        if not different_post and not legacy_lock_expired and pid > 0:
             try:
                 os.kill(pid, 0)
                 return False
@@ -616,6 +662,7 @@ class PackageManager:
         identifiers: list[str] | None = None,
         progress_callback: Callable[[float], None] | None = None,
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
+        wait_timeout: float = 30.0,
     ) -> Iterator[Event]:
         verify_install_root(self.layout.root)
         raw_identifiers = self.state.read().get("setup_packages", []) if identifiers is None else identifiers
@@ -634,10 +681,12 @@ class PackageManager:
                 break
             except OperationBusyError:
                 if not waiting_reported:
-                    yield ("waiting", "Another GoinfrePM operation is using this post; waiting for it to finish")
+                    yield ("waiting", "Preparing your Auto Setup…")
                     waiting_reported = True
-                if time.monotonic() - wait_started >= 30 * 60:
-                    raise RuntimeError("Another GoinfrePM operation is still active after 30 minutes; retry later")
+                if time.monotonic() - wait_started >= max(0.0, wait_timeout):
+                    raise OperationBusyError(
+                        "GoinfrePM is still finishing another task on this post"
+                    )
                 time.sleep(0.5)
         try:
             total = len(identifiers)

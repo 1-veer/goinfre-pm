@@ -465,6 +465,45 @@ def test_failed_restore_is_visible_for_the_current_session(monkeypatch, tmp_path
     asyncio.run(scenario())
 
 
+def test_auto_setup_busy_wait_offers_retry_without_false_failure(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:1]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_package(packages[0].identifier, True)
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=True)
+        attempts = 0
+
+        def delayed_restore(_cancel, identifiers, **_callbacks):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                yield ("waiting", "Preparing your Auto Setup…")
+                raise app_module.OperationBusyError("still busy")
+            identifier = identifiers[0]
+            yield ("package", (identifier, 1, 1))
+            yield ("restored", identifier)
+
+        app.manager.restore = delayed_restore  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            await pilot.press("enter")
+            await pilot.pause(0.6)
+            assert isinstance(app.screen, app_module.AutoSetupBusyModal)
+            assert packages[0].identifier not in app.runtime_status
+            await pilot.press("enter")
+            await pilot.pause(0.6)
+            assert attempts == 2
+            assert isinstance(app.screen, app_module.SummaryModal)
+            assert "Failed: 0" in app.screen.summary
+
+    asyncio.run(scenario())
+
+
 def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypatch, tmp_path) -> None:
     packages = _packages()
     state = StateStore(tmp_path / "state.json")

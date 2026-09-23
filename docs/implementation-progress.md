@@ -94,3 +94,18 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - Bandit reports no medium/high findings.
 - Ubuntu 22.04 GUI launch validation remains a release check on a school workstation.
 - No commit, push, or npm publication has been performed.
+
+## 1.5.4 cross-post Auto Setup lock fix
+
+- [x] Record workstation and Linux boot identity in every payload-operation lock.
+- [x] Discard a stale lock carried from another school post even when its PID was reused locally.
+- [x] Present short-lived contention as “Preparing your Auto Setup…” instead of a failure.
+- [x] Offer Retry / Not now after 30 seconds without marking packages as failed.
+- [x] Recheck package health after acquiring the lock to avoid duplicate downloads.
+
+### 1.5.4 validation
+
+- 132 Python tests pass on macOS, including cross-post PID reuse, lock waiting, timeout, retry, and cancellation.
+- Python compilation, shell syntax, npm tests, package dry-run, and whitespace checks pass.
+- Shellcheck remains unavailable locally. Ubuntu 22.04 GUI validation remains a school-workstation release check.
+- No commit, push, or npm publication has been performed.

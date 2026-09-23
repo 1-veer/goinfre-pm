@@ -1,6 +1,6 @@
 {
   "name": "goinfre-pm",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
   "license": "MIT",
   "author": "veer",

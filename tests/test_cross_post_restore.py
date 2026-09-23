@@ -7,7 +7,7 @@ import pytest
 
 from goinfre_pm import integration
 from goinfre_pm.downloader import DownloadCancelled
-from goinfre_pm.installer import InstallationCheck, OperationLock, PackageManager
+from goinfre_pm.installer import InstallationCheck, OperationBusyError, OperationLock, PackageManager
 from goinfre_pm.models import InstalledPackage, Package
 from goinfre_pm.storage import Layout, StateStore
 
@@ -309,6 +309,35 @@ def test_root_local_operation_lock_rejects_overlap(tmp_path: Path) -> None:
             with OperationLock(layout):
                 pass
     assert not (layout.runtime / "operation.lock").exists()
+
+
+def test_operation_lock_discards_lock_from_another_post(tmp_path: Path) -> None:
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    layout.create()
+    lock_file = layout.runtime / "operation.lock"
+    lock_file.write_text(
+        '{"pid": %d, "token": "old", "created_at": %f, '
+        '"hostname": "another-post", "boot_id": "another-boot"}'
+        % (os.getpid(), time.time()),
+        encoding="utf-8",
+    )
+
+    with OperationLock(layout):
+        assert lock_file.exists()
+    assert not lock_file.exists()
+
+
+def test_restore_times_out_cleanly_when_real_operation_stays_active(tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+
+    with OperationLock(manager.layout):
+        events = manager.restore(wait_timeout=0)
+        assert next(events) == ("waiting", "Preparing your Auto Setup…")
+        with pytest.raises(OperationBusyError, match="still finishing another task"):
+            next(events)
 
 
 def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatch, tmp_path: Path) -> None:
