@@ -820,17 +820,35 @@ class GoinfrePMApp(App[None]):
         self.query_one("#operation", Static).update("Preparing your Auto Setup…")
         self._restore_worker(packages)
 
+    def _main_screen(self) -> Screen | None:
+        """Return the underlying package screen even while a modal is active."""
+        for screen in self.screen_stack:
+            if list(screen.query("#package-table")):
+                return screen
+        return None
+
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
+        main_screen = self._main_screen()
+        if not self.is_running or main_screen is None:
+            return
+        categories = list(main_screen.query("#categories"))
+        details = list(main_screen.query("#details"))
+        tasks = list(main_screen.query("#tasks"))
+        brands = list(main_screen.query("#brand"))
+        basket_statuses = list(main_screen.query("#basket-status"))
+        category_lists = list(main_screen.query("#category-list"))
+        if not all((categories, details, tasks, brands, basket_statuses)):
+            return
         width = event.size.width
-        self.query_one("#categories").display = width >= 100
-        self.query_one("#details").display = width >= 82
-        self.query_one("#tasks").styles.height = 5 if width < 82 else (6 if width < 100 else 7)
-        self.query_one("#brand").styles.width = 18 if width < 82 else 22
-        self.query_one("#basket-status").styles.width = 24 if width < 82 else 34
-        self.query_one("#basket-status").display = width >= 120
+        categories[0].display = width >= 100
+        details[0].display = width >= 82
+        tasks[0].styles.height = 5 if width < 82 else (6 if width < 100 else 7)
+        brands[0].styles.width = 18 if width < 82 else 22
+        basket_statuses[0].styles.width = 24 if width < 82 else 34
+        basket_statuses[0].display = width >= 120
         self._update_storage_label()
-        if width < 100 and self.query_one(OptionList).has_focus and self.visible_packages:
+        if width < 100 and category_lists and category_lists[0].has_focus and self.visible_packages:
             self.action_focus_packages()
 
     def _set_active_pane(self, active: str | None) -> None:
@@ -946,7 +964,8 @@ class GoinfrePMApp(App[None]):
             if self.post_storage_bytes is not None
             else "GPM usage checking"
         )
-        storage_nodes = list(self.query("#storage"))
+        main_screen = self._main_screen()
+        storage_nodes = list(main_screen.query("#storage")) if main_screen is not None else []
         if not self.is_running or not storage_nodes:
             return free_bytes
         if self.size.width < 120:

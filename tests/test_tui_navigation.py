@@ -680,6 +680,40 @@ def test_storage_usage_callback_tolerates_header_teardown(monkeypatch, tmp_path)
     asyncio.run(scenario())
 
 
+def test_leave_modal_can_resize_between_compact_and_full_layout(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: _packages()[:1])
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            await pilot.press("x")
+            assert isinstance(app.screen, app_module.LeavePostModal)
+
+            await pilot.resize_terminal(80, 24)
+            await pilot.pause()
+            assert isinstance(app.screen, app_module.LeavePostModal)
+            main_screen = app.screen_stack[0]
+            assert not main_screen.query_one("#categories").display
+            assert not main_screen.query_one("#details").display
+            assert not main_screen.query_one("#basket-status").display
+            assert "x Clean & leave" in str(main_screen.query_one("#storage").renderable)
+
+            await pilot.resize_terminal(130, 36)
+            await pilot.pause()
+            assert isinstance(app.screen, app_module.LeavePostModal)
+            assert main_screen.query_one("#categories").display
+            assert main_screen.query_one("#details").display
+            assert main_screen.query_one("#basket-status").display
+            await pilot.press("escape")
+
+    asyncio.run(scenario())
+
+
 def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypatch, tmp_path) -> None:
     packages = _packages()
     state = StateStore(tmp_path / "state.json")

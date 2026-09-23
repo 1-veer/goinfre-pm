@@ -143,3 +143,16 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - Python compilation, shell syntax, npm tests, the 28-file npm dry-run package, release-version consistency, branding search, and whitespace checks pass.
 - Shellcheck remains unavailable locally. The Ubuntu 22.04 GUI remains a final school-workstation release check.
 - No commit, push, or npm publication has been performed.
+
+## 1.5.7 modal resize hardening
+
+- [x] Resolve responsive widgets from the underlying package screen while a modal is open.
+- [x] Treat missing main-screen nodes during startup and shutdown as a harmless lifecycle state.
+- [x] Keep compact/fullscreen layout transitions working while the Leave this post dialog is active.
+
+### 1.5.7 validation
+
+- 144 Python tests pass on macOS, including the exact open-cleanup-modal and compact/fullscreen resize sequence.
+- Python compilation, shell syntax, npm tests, the 28-file npm dry-run package, and whitespace checks pass.
+- Shellcheck remains unavailable locally. Ubuntu 22.04 remains the final real-workstation validation target.
+- No commit, push, or npm publication has been performed.
