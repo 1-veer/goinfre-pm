@@ -1,4 +1,6 @@
 import asyncio
+import threading
+from types import SimpleNamespace
 
 from textual.command import CommandPalette
 from textual.widgets import Button, DataTable, Input, OptionList
@@ -369,7 +371,7 @@ def test_auto_setup_asks_before_restoring_and_no_restore_skips_it(monkeypatch, t
             await pilot.pause(0.6)
             assert restored == [[package.identifier for package in packages]]
             assert isinstance(accepted.screen, app_module.SummaryModal)
-            assert "Auto Setup restore complete" in str(accepted.screen.query_one(".modal-title").renderable)
+            assert "Auto Setup is ready" in str(accepted.screen.query_one(".modal-title").renderable)
 
         skipped: list[object] = []
         no_restore = app_module.GoinfrePMApp(auto_restore=False)
@@ -486,7 +488,8 @@ def test_auto_setup_busy_wait_offers_retry_without_false_failure(monkeypatch, tm
                 raise app_module.OperationBusyError("still busy")
             identifier = identifiers[0]
             yield ("package", (identifier, 1, 1))
-            yield ("restored", identifier)
+            yield ("ready", identifier)
+            yield ("log", "Completed by another GoinfrePM session")
 
         app.manager.restore = delayed_restore  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
@@ -499,7 +502,158 @@ def test_auto_setup_busy_wait_offers_retry_without_false_failure(monkeypatch, tm
             await pilot.pause(0.6)
             assert attempts == 2
             assert isinstance(app.screen, app_module.SummaryModal)
-            assert "Failed: 0" in app.screen.summary
+            assert "Ready: 1" in app.screen.summary
+            assert "Completed by another GoinfrePM session" in app.screen.summary
+            assert "Skipped: 0" in app.screen.summary
+
+    asyncio.run(scenario())
+
+
+def test_auto_setup_mirrors_another_sessions_progress(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:1]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_package(packages[0].identifier, True)
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+    release = threading.Event()
+
+    def followed_restore(_cancel, identifiers, **_callbacks):
+        identifier = identifiers[0]
+        yield ("waiting", "Preparing your Auto Setup…")
+        yield (
+            "peer_progress",
+            {
+                "package": identifier,
+                "package_name": packages[0].name,
+                "phase": "downloading",
+                "index": 1,
+                "total": 1,
+                "progress": 37,
+            },
+        )
+        assert release.wait(2)
+        yield ("ready", identifier)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=True)
+        app.manager.restore = followed_restore  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            operation = str(app.screen_stack[0].query_one("#operation").renderable)
+            assert packages[0].name in operation
+            assert "37%" in operation
+            release.set()
+            await pilot.pause(0.4)
+            assert isinstance(app.screen, app_module.SummaryModal)
+            assert "Ready: 1" in app.screen.summary
+
+    asyncio.run(scenario())
+
+
+def test_leave_post_cleanup_is_recommended_and_confirmed(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: _packages()[:1])
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        calls: list[str] = []
+        app.manager.leave_post = lambda: calls.append("leave") or SimpleNamespace(  # type: ignore[method-assign]
+            bytes_removed=1024,
+            integrations_removed=1,
+            root_removed=True,
+        )
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            assert any(
+                "before leaving" in command.title.lower()
+                for command in app.get_system_commands(app.screen)
+            )
+            await pilot.press("x")
+            assert isinstance(app.screen, app_module.LeavePostModal)
+            assert app.screen.query_one("#cancel", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause()
+            assert calls == []
+
+            await pilot.press("x", "left", "enter")
+            await pilot.pause(0.5)
+            assert calls == ["leave"]
+            assert isinstance(app.screen, app_module.SummaryModal)
+            assert "Reclaimed: 1.0 KiB" in app.screen.summary
+            assert state.read()["setup_packages"] == []
+
+    asyncio.run(scenario())
+
+
+def test_quit_offers_cleanup_only_when_post_has_data(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: _packages()[:1])
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        exits: list[str] = []
+        app.exit = lambda *_args, **_kwargs: exits.append("exit")  # type: ignore[method-assign]
+        app.manager.post_storage_report = lambda: SimpleNamespace(  # type: ignore[method-assign]
+            total_bytes=3 * 1024**3,
+            entries=2,
+            has_data=True,
+        )
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            leave_binding = next(binding for binding in app.BINDINGS if binding.key == "x")
+            assert leave_binding.show
+            await pilot.press("q")
+            assert isinstance(app.screen, app_module.QuitPostModal)
+            assert "3.0 GiB" in str(app.screen.query_one(".modal-copy").renderable)
+            assert app.screen.query_one("#exit", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause()
+            assert exits == ["exit"]
+
+        clean_app = app_module.GoinfrePMApp(auto_restore=False)
+        clean_exits: list[str] = []
+        clean_app.exit = lambda *_args, **_kwargs: clean_exits.append("exit")  # type: ignore[method-assign]
+        clean_app.manager.post_storage_report = lambda: SimpleNamespace(  # type: ignore[method-assign]
+            total_bytes=0,
+            entries=0,
+            has_data=False,
+        )
+        async with clean_app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            await pilot.press("q")
+            await pilot.pause()
+            assert not isinstance(clean_app.screen, app_module.QuitPostModal)
+            assert clean_exits == ["exit"]
+
+        cleaning_app = app_module.GoinfrePMApp(auto_restore=False)
+        clean_calls: list[str] = []
+        cleaning_app.manager.post_storage_report = lambda: SimpleNamespace(  # type: ignore[method-assign]
+            total_bytes=2048,
+            entries=1,
+            has_data=True,
+        )
+        cleaning_app.manager.leave_post = lambda: clean_calls.append("leave") or SimpleNamespace(  # type: ignore[method-assign]
+            bytes_removed=2048,
+            integrations_removed=1,
+            root_removed=True,
+        )
+        async with cleaning_app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            await pilot.press("q", "left", "enter")
+            await pilot.pause(0.5)
+            assert clean_calls == ["leave"]
+            assert isinstance(cleaning_app.screen, app_module.SummaryModal)
+            assert "Reclaimed: 2.0 KiB" in cleaning_app.screen.summary
 
     asyncio.run(scenario())
 
@@ -590,7 +744,10 @@ def test_doctor_can_clean_only_reported_temporary_files(monkeypatch, tmp_path) -
             assert not temporary.exists()
             assert installed.is_dir()
             assert not app.busy
-            assert "Cleaned 1 temporary item" in str(app.query_one("#logs").lines[0])
+            assert any(
+                "Cleaned 1 temporary item" in str(line)
+                for line in app.query_one("#logs").lines
+            )
 
     asyncio.run(scenario())
 
@@ -671,6 +828,19 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             removal = narrow.screen.query_one(".removal-modal")
             assert removal.region.height <= 24
             assert removal.region.width <= 80
+            await pilot.press("escape")
+            narrow.push_screen(app_module.LeavePostModal(tmp_path / "goinfre-pm"))
+            await pilot.pause()
+            leave = narrow.screen.query_one(".auto-setup-prompt-modal")
+            assert leave.region.height <= 24
+            assert leave.region.width <= 80
+            await pilot.press("escape")
+            narrow.push_screen(app_module.QuitPostModal(tmp_path / "goinfre-pm", 3 * 1024**3))
+            await pilot.pause()
+            quit_modal = narrow.screen.query_one(".quit-post-modal")
+            assert quit_modal.region.height <= 24
+            assert quit_modal.region.width <= 80
+            assert all(button.region.right <= quit_modal.region.right for button in quit_modal.query(Button))
             await pilot.press("escape")
 
         wide = app_module.GoinfrePMApp()

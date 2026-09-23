@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from goinfre_pm import app as app_module, cli
 from goinfre_pm.errors import error_text, write_crash_log
@@ -108,6 +109,27 @@ def test_autostart_accepts_explicit_local_manager(monkeypatch, tmp_path) -> None
     desktop = tmp_path / "autostart" / "goinfre-pm-restore.desktop"
     assert f'Exec="{launcher}" restore' in desktop.read_text(encoding="utf-8")
     assert state.read()["autostart"] is True
+
+
+def test_leave_cli_requires_confirmation_and_supports_explicit_yes(monkeypatch, tmp_path, capsys) -> None:
+    calls: list[str] = []
+
+    class Manager:
+        layout = SimpleNamespace(root=tmp_path / "goinfre-pm")
+
+        def leave_post(self):
+            calls.append("leave")
+            return SimpleNamespace(bytes_removed=4096, integrations_removed=2, root_removed=True)
+
+    monkeypatch.setattr(cli, "_manager", Manager)
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+
+    assert cli.main(["leave"]) == 1
+    assert calls == []
+    assert "needs confirmation" in capsys.readouterr().err
+    assert cli.main(["leave", "--yes"]) == 0
+    assert calls == ["leave"]
+    assert "Post cleaned" in capsys.readouterr().out
 
 
 def test_restore_cli_aliases_dispatch_and_report_partial_failure(monkeypatch, tmp_path, capsys) -> None:

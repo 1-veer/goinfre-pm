@@ -45,6 +45,8 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .modal-copy { color: $gpm-muted; height: auto; margin-bottom: 1; }
 .welcome-modal { width: 72; }
 .auto-setup-prompt-modal { width: 72; max-height: 90%; }
+.quit-post-modal { width: 76; max-height: 90%; }
+.quit-post-buttons Button { width: 1fr; margin: 0 1; }
 #auto-setup-prompt-list { height: auto; max-height: 10; margin-bottom: 1; padding: 0 1; background: $gpm-panel; color: $gpm-text; }
 .packs-modal { width: 72; height: 90%; max-height: 25; }
 .packs-modal OptionList { height: 6; background: $gpm-panel; border: round #49325e; }

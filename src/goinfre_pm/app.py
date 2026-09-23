@@ -203,8 +203,8 @@ class HelpModal(ModalScreen[None]):
                 "Enter open/launch   i install/actions   I/b basket   r/R remove\n"
                 "a select visible\n"
                 "m toggle Auto Setup   M add selection   c cancel operation\n"
-                "t Starter Packs   f favorite   s sort   d Doctor\n"
-                "/ search   p path   ^P themes/mode   l logs   w welcome   ? help   q/Esc back"
+                "t Starter Packs   f favorite   s sort   d Doctor   x leave-post cleanup\n"
+                "/ search   p path   ^P themes/mode   l logs   w welcome   ? help   q exit   Esc back"
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Close", variant="primary", id="close")
@@ -234,6 +234,7 @@ class WelcomeModal(ModalScreen[None]):
                 "Use ↑/↓ to browse, → to enter the package list, Space to select, "
                 "m to save an app in Auto Setup, ^P to choose a theme, t for Starter Packs, "
                 "and b to review your basket.\n\nMade by VEER"
+                "\n\nBefore leaving a shared post, press x to remove GoinfrePM data (recommended)."
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Start exploring", variant="primary", id="continue")
@@ -325,6 +326,99 @@ class AutoSetupBusyModal(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class LeavePostModal(ModalScreen[bool]):
+    """Confirm complete removal of this post's GoinfrePM storage."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(self, root: Path, bytes_used: int | None = None) -> None:
+        super().__init__()
+        self.root = root
+        self.bytes_used = bytes_used
+
+    def compose(self) -> ComposeResult:
+        reclaimable = (
+            f"Reclaimable: [b]{human_size(self.bytes_used)}[/b]\n"
+            if self.bytes_used is not None
+            else ""
+        )
+        with Vertical(classes="modal auto-setup-prompt-modal"):
+            yield Label("Clean this post before leaving?", classes="modal-title")
+            yield Static(
+                "Recommended on shared 1337/42 workstations. This permanently removes:\n"
+                "• downloaded and installed application payloads\n"
+                "• GoinfrePM downloads, logs, runtime files, and the goinfre Python environment\n"
+                "• launchers and desktop entries created by GoinfrePM\n\n"
+                f"Storage: [b]{self.root}[/b]\n"
+                f"{reclaimable}\n"
+                "Your Auto Setup, theme, favorites, and ordinary application profiles remain "
+                "available for the next post. Personal configuration and cache are not deleted. "
+                "GoinfrePM will close when cleanup finishes.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Delete post data", variant="error", id="confirm")
+                yield Button("Cancel", variant="primary", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 1
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "confirm")
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class QuitPostModal(ModalScreen[str | None]):
+    """Offer post cleanup at the moment a student normally quits."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def __init__(self, root: Path, bytes_used: int) -> None:
+        super().__init__()
+        self.root = root
+        self.bytes_used = bytes_used
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal quit-post-modal"):
+            yield Label("Leaving this post?", classes="modal-title")
+            yield Static(
+                f"GoinfrePM is using [b]{human_size(self.bytes_used)}[/b] on this post.\n"
+                f"Storage: [b]{self.root}[/b]\n\n"
+                "[b]Recommended:[/b] clean the post before leaving. This removes GoinfrePM "
+                "applications and runtime files from this computer, while keeping your Auto "
+                "Setup, theme, favorites, and ordinary application profiles.",
+                classes="modal-copy",
+            )
+            with Horizontal(classes="modal-buttons quit-post-buttons"):
+                yield Button("Clean & exit", variant="error", id="clean")
+                yield Button("Exit without cleaning", variant="primary", id="exit")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        # Destructive cleanup is recommended but never the accidental default.
+        self.query_one("#exit", Button).focus()
+
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 1
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(None if event.button.id == "cancel" else event.button.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class StarterPacksModal(ModalScreen[StarterPack | None]):
@@ -532,7 +626,8 @@ class GoinfrePMApp(App[None]):
     CSS_PATH = "theme.tcss"
     TITLE = DISPLAY_NAME
     BINDINGS = [
-        Binding("q", "quit", "Quit"), Binding("escape", "back", "Back", show=False),
+        Binding("q", "quit", "Exit"), Binding("x", "leave_post", "Clean & leave"),
+        Binding("escape", "back", "Back", show=False),
         Binding("j", "down", "Down", show=False), Binding("k", "up", "Up", show=False),
         Binding("right", "focus_packages", "Packages", show=False, priority=True),
         Binding("left", "focus_categories", "Categories", show=False, priority=True),
@@ -570,6 +665,7 @@ class GoinfrePMApp(App[None]):
         self.update_available: set[str] = set()
         self.update_info: dict[str, UpdateInfo] = {}
         self.startup_finished = False
+        self.post_storage_bytes: int | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header"):
@@ -614,9 +710,15 @@ class GoinfrePMApp(App[None]):
             self._set_active_pane("categories")
         self.set_timer(0.25, self._finish_startup)
         self._check_updates()
+        self._refresh_post_storage_usage()
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         yield from super().get_system_commands(screen)
+        yield SystemCommand(
+            "Clean this post before leaving (recommended)",
+            "Remove GoinfrePM applications and runtime data from this shared workstation",
+            self.action_leave_post,
+        )
         for theme in UI_THEMES:
             label = theme.title()
             suffix = " (current)" if theme == self.ui_theme else ""
@@ -650,6 +752,9 @@ class GoinfrePMApp(App[None]):
         splashes = list(self.query("#splash"))
         if splashes:
             splashes[0].remove()
+        self.query_one(RichLog).write(
+            "[dim]Recommended: press x before leaving this shared post to reclaim GoinfrePM storage.[/dim]"
+        )
         if not self.state.read().get("onboarding_complete", False):
             self.push_screen(WelcomeModal(self.layout.root), self._onboarding_closed)
         else:
@@ -723,6 +828,7 @@ class GoinfrePMApp(App[None]):
         self.query_one("#tasks").styles.height = 5 if width < 82 else (6 if width < 100 else 7)
         self.query_one("#brand").styles.width = 18 if width < 82 else 22
         self.query_one("#basket-status").styles.width = 24 if width < 82 else 34
+        self._update_storage_label()
         if width < 100 and self.query_one(OptionList).has_focus and self.visible_packages:
             self.action_focus_packages()
 
@@ -817,19 +923,47 @@ class GoinfrePMApp(App[None]):
                     table.move_cursor(row=row, animate=False)
                     break
         self._details()
-        try:
-            free_bytes = available_space(self.layout.root)
-            free_text = f"{free_bytes / 1024**3:.1f} GiB free"
-        except OSError:
-            free_bytes = 0
-            free_text = "storage unavailable"
-        self.query_one("#storage", Static).update(f"{self.layout.root}  •  {free_text}")
+        free_bytes = self._update_storage_label()
         selected = [package for package in self.packages if package.selected]
         estimate = estimate_basket(selected, free_bytes, installed)
         size_text = human_size(estimate.known_installed)
         if estimate.unknown_installed:
             size_text += f" + {estimate.unknown_installed} unknown"
         self.query_one("#basket-status", Static).update(f"{estimate.count} selected  •  {size_text}")
+
+    def _update_storage_label(self) -> int:
+        try:
+            free_bytes = available_space(self.layout.root)
+            free_text = f"{free_bytes / 1024**3:.1f} GiB free"
+        except OSError:
+            free_bytes = 0
+            free_text = "storage unavailable"
+        usage = (
+            f"{human_size(self.post_storage_bytes)} GPM"
+            if self.post_storage_bytes is not None
+            else "GPM usage checking"
+        )
+        separator = "\n" if self.size.width < 100 else "  •  "
+        self.query_one("#storage", Static).update(
+            f"{self.layout.root}{separator}{free_text}  ·  {usage}  ·  x Clean & leave"
+        )
+        return free_bytes
+
+    @work(thread=True, exclusive=True, group="storage-usage")
+    def _refresh_post_storage_usage(self) -> None:
+        manager = self.manager
+        root = self.layout.root
+        try:
+            total_bytes = manager.post_storage_report().total_bytes
+        except (OSError, RuntimeError):
+            return
+        self.call_from_thread(self._show_post_storage_usage, root, total_bytes)
+
+    def _show_post_storage_usage(self, root: Path, total_bytes: int) -> None:
+        if root != self.layout.root:
+            return
+        self.post_storage_bytes = total_bytes
+        self._update_storage_label()
 
     def _current(self) -> Package | None:
         table = self.query_one(DataTable)
@@ -984,7 +1118,25 @@ class GoinfrePMApp(App[None]):
         if self.busy:
             self.notify("Wait for the current operation to finish before quitting", severity="warning")
             return
-        self.exit()
+        try:
+            report = self.manager.post_storage_report()
+        except (OSError, RuntimeError):
+            self.exit()
+            return
+        if not report.has_data:
+            self.exit()
+            return
+        self.post_storage_bytes = report.total_bytes
+        self.push_screen(
+            QuitPostModal(self.layout.root, report.total_bytes),
+            self._quit_post_choice,
+        )
+
+    def _quit_post_choice(self, choice: str | None) -> None:
+        if choice == "clean":
+            self._leave_post_confirmed(True)
+        elif choice == "exit":
+            self.exit()
 
     def action_cancel_operation(self) -> None:
         if not self.busy:
@@ -1132,6 +1284,51 @@ class GoinfrePMApp(App[None]):
                 self._doctor_closed,
             )
 
+    def action_leave_post(self) -> None:
+        if self.busy:
+            self.notify("Finish or cancel the current operation first", severity="warning")
+            return
+        try:
+            self.post_storage_bytes = self.manager.post_storage_report().total_bytes
+        except (OSError, RuntimeError):
+            pass
+        self.push_screen(
+            LeavePostModal(self.layout.root, self.post_storage_bytes),
+            self._leave_post_confirmed,
+        )
+
+    def _leave_post_confirmed(self, confirmed: bool) -> None:
+        if not confirmed or self.busy:
+            return
+        self.busy = True
+        self.query_one("#operation", Static).update("Cleaning this post…")
+        self._leave_post_worker()
+
+    @work(thread=True, exclusive=True, group="leave-post")
+    def _leave_post_worker(self) -> None:
+        try:
+            report = self.manager.leave_post()
+            summary = (
+                f"Reclaimed: {human_size(report.bytes_removed)}\n"
+                f"Removed integrations: {report.integrations_removed}\n"
+                f"Storage root: {'removed' if report.root_removed else 'cleaned; unrelated files were kept'}\n\n"
+                "Your Auto Setup, theme, favorites, profiles, and cache were preserved."
+            )
+            self.call_from_thread(self._show_leave_post_complete, summary)
+        except Exception as exc:
+            message = error_text(exc)
+            self.call_from_thread(self.query_one(RichLog).write, f"[red]Post cleanup failed: {message}[/red]")
+            self.call_from_thread(self.notify, f"Post cleanup failed: {message}", severity="error")
+            self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
+        finally:
+            self.busy = False
+
+    def _show_leave_post_complete(self, summary: str) -> None:
+        self.push_screen(
+            SummaryModal("This post is clean", summary),
+            lambda _result: self.exit(),
+        )
+
     def _doctor_closed(self, action: str | None) -> None:
         if action == "clean" and not self.busy:
             self.busy = True
@@ -1156,6 +1353,7 @@ class GoinfrePMApp(App[None]):
             self.busy = False
             self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
             self.call_from_thread(self._refresh)
+            self.call_from_thread(self._refresh_post_storage_usage)
 
     @work(thread=True, exclusive=True, group="update-checks")
     def _check_updates(self) -> None:
@@ -1193,7 +1391,9 @@ class GoinfrePMApp(App[None]):
             self.layout = Layout.at(root)
             self.layout.create()
             self.manager = PackageManager(self.layout, self.packages, self.state)
+            self.post_storage_bytes = None
             self._refresh()
+            self._refresh_post_storage_usage()
             self.notify(f"Install root changed to {root}")
 
     def action_install_one(self) -> None:
@@ -1338,6 +1538,7 @@ class GoinfrePMApp(App[None]):
         started = time.monotonic()
         by_identifier = {package.identifier: package for package in packages}
         succeeded: list[Package] = []
+        ready: list[Package] = []
         failed: list[tuple[Package, str]] = []
         skipped: list[tuple[Package, str]] = []
         current: list[Package | None] = [None]
@@ -1357,6 +1558,33 @@ class GoinfrePMApp(App[None]):
                 if kind == "waiting":
                     self.call_from_thread(self.query_one("#operation", Static).update, str(value))
                     self.call_from_thread(self.query_one(RichLog).write, str(value))
+                elif kind == "peer_progress":
+                    status = value if isinstance(value, dict) else {}
+                    identifier = str(status.get("package", ""))
+                    package = by_identifier.get(identifier)
+                    if package is not None:
+                        changed_package = current[0] != package
+                        current[0] = package
+                        self.runtime_status[package.identifier] = "restoring"
+                        if changed_package:
+                            self.call_from_thread(self._refresh, preserve_identifier=package.identifier)
+                    try:
+                        progress = float(status.get("progress", 0))
+                    except (TypeError, ValueError):
+                        progress = 0
+                    self.call_from_thread(
+                        self.query_one(ProgressBar).update,
+                        progress=max(0.0, min(100.0, progress)),
+                    )
+                    name = str(status.get("package_name", "")) or "Auto Setup"
+                    phase = str(status.get("phase", "preparing")).replace("_", " ").title()
+                    index = status.get("index")
+                    total = status.get("total")
+                    position = f" {index}/{total}" if index and total else ""
+                    self.call_from_thread(
+                        self.query_one("#operation", Static).update,
+                        f"{phase}{position}: {name} · {progress:.0f}%",
+                    )
                 elif kind == "package":
                     identifier, index, total = value  # type: ignore[misc]
                     package = by_identifier.get(str(identifier))
@@ -1378,6 +1606,11 @@ class GoinfrePMApp(App[None]):
                     if package:
                         self.runtime_status.pop(package.identifier, None)
                         succeeded.append(package)
+                elif kind == "ready":
+                    package = by_identifier.get(str(value))
+                    if package:
+                        self.runtime_status.pop(package.identifier, None)
+                        ready.append(package)
                 elif kind in {"failed", "skipped"}:
                     identifier, reason = value  # type: ignore[misc]
                     package = by_identifier.get(str(identifier))
@@ -1418,7 +1651,15 @@ class GoinfrePMApp(App[None]):
             if retry_needed:
                 self.call_from_thread(self._show_auto_setup_retry, packages)
             else:
-                self.call_from_thread(self._show_summary, succeeded, failed, "restore", elapsed, skipped)
+                self.call_from_thread(
+                    self._show_summary,
+                    succeeded,
+                    failed,
+                    "restore",
+                    elapsed,
+                    skipped,
+                    ready,
+                )
 
     def _show_transfer(self, package: Package, done: int, total: int | None, speed: float, eta: float | None) -> None:
         amount = human_size(done)
@@ -1435,9 +1676,11 @@ class GoinfrePMApp(App[None]):
         operation: str,
         elapsed: float,
         skipped: list[tuple[Package, str]] | None = None,
+        ready: list[Package] | None = None,
     ) -> None:
         skipped = skipped or []
-        for package in succeeded:
+        ready = ready or []
+        for package in [*succeeded, *ready]:
             package.selected = False
         action = {
             "install": "Installed",
@@ -1447,18 +1690,44 @@ class GoinfrePMApp(App[None]):
             "remove": "Removed",
             "restore": "Restored",
         }[operation]
-        lines = [
-            f"{action}: {len(succeeded)}   Failed: {len(failed)}   Skipped: {len(skipped)}   Time: {elapsed:.1f}s",
-            f"Location: {self.layout.apps}",
-        ]
+        if operation == "restore":
+            lines = [
+                f"Ready: {len(succeeded) + len(ready)}   Failed: {len(failed)}   "
+                f"Skipped: {len(skipped)}   Time: {elapsed:.1f}s",
+                f"Location: {self.layout.apps}",
+            ]
+        else:
+            lines = [
+                f"{action}: {len(succeeded)}   Failed: {len(failed)}   "
+                f"Skipped: {len(skipped)}   Time: {elapsed:.1f}s",
+                f"Location: {self.layout.apps}",
+            ]
         if succeeded:
-            lines.extend(("", "Completed:", *(f"  • {package.name}" for package in succeeded)))
+            heading = "Installed or repaired:" if operation == "restore" else "Completed:"
+            lines.extend(("", heading, *(f"  • {package.name}" for package in succeeded)))
+        if ready:
+            lines.extend(
+                (
+                    "",
+                    "Completed by another GoinfrePM session:",
+                    *(f"  • {package.name}" for package in ready),
+                )
+            )
         if failed:
             lines.extend(("", "Needs attention:", *(f"  • {package.name}: {message}" for package, message in failed)))
         if skipped:
             lines.extend(("", "Skipped:", *(f"  • {package.name}: {message}" for package, message in skipped)))
+        if operation in {"install", "update", "reinstall", "restore"}:
+            lines.extend(("", "Before leaving this shared post, press x to clean its GoinfrePM storage."))
         self._refresh()
-        title = "Auto Setup restore complete" if operation == "restore" else "Operation complete"
+        self._refresh_post_storage_usage()
+        title = (
+            "Auto Setup is ready"
+            if operation == "restore" and not failed
+            else "Auto Setup finished"
+            if operation == "restore"
+            else "Operation complete"
+        )
         self.push_screen(SummaryModal(title, "\n".join(lines)))
 
     def _handle_exception(self, error: Exception) -> None:

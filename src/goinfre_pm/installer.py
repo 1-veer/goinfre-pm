@@ -18,7 +18,13 @@ import uuid
 from . import integration as integration_module
 from .downloader import DownloadCancelled, download
 from .extractor import extract_download
-from .integration import find_executable, integrate, remove_integration, validate_user_data_path
+from .integration import (
+    find_executable,
+    integrate,
+    remove_integration,
+    remove_integration_by_identifier,
+    validate_user_data_path,
+)
 from .models import InstalledPackage, Package, validate_package_id
 from .storage import Layout, LocalStateStore, StateStore, available_space, verify_install_root
 
@@ -58,6 +64,25 @@ class CleanupReport:
     @property
     def count(self) -> int:
         return len(self.items)
+
+
+@dataclass(frozen=True)
+class LeavePostReport:
+    bytes_removed: int
+    integrations_removed: int
+    root_removed: bool
+
+
+@dataclass(frozen=True)
+class PostStorageReport:
+    """A read-only preview of manager-owned data on the current post."""
+
+    total_bytes: int
+    entries: int
+
+    @property
+    def has_data(self) -> bool:
+        return self.entries > 0
 
 
 class OperationBusyError(RuntimeError):
@@ -139,6 +164,7 @@ class OperationLock:
 
     def __init__(self, layout: Layout) -> None:
         self.path = layout.runtime / "operation.lock"
+        self.status_path = layout.runtime / "operation-status.json"
         self.token = uuid.uuid4().hex
         self.hostname = socket.gethostname()
         self.boot_id = _current_boot_id()
@@ -169,6 +195,56 @@ class OperationLock:
             self.acquired = True
             return self
         raise RuntimeError("Could not acquire the GoinfrePM operation lock")
+
+    def publish_status(self, **status: object) -> None:
+        """Atomically expose small, non-sensitive progress for another TUI."""
+        if not self.acquired:
+            return
+        payload = {
+            "token": self.token,
+            "pid": os.getpid(),
+            "hostname": self.hostname,
+            "boot_id": self.boot_id,
+            "updated_at": time.time(),
+            **status,
+        }
+        temporary: Path | None = None
+        try:
+            descriptor, temporary_text = tempfile.mkstemp(
+                prefix=".operation-status-",
+                dir=self.status_path.parent,
+            )
+            temporary = Path(temporary_text)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.status_path)
+        except (OSError, TypeError, ValueError):
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def peer_status(self) -> dict[str, object] | None:
+        """Read progress only when it belongs to the process owning the lock."""
+        try:
+            lock_value = json.loads(self.path.read_text(encoding="utf-8"))
+            status = json.loads(self.status_path.read_text(encoding="utf-8"))
+            if not isinstance(lock_value, dict) or not isinstance(status, dict):
+                return None
+            if not lock_value.get("token") or status.get("token") != lock_value.get("token"):
+                return None
+            return status
+        except (OSError, json.JSONDecodeError, TypeError):
+            return None
+
+    def _remove_status(self, token: object) -> None:
+        try:
+            status = json.loads(self.status_path.read_text(encoding="utf-8"))
+            if isinstance(status, dict) and status.get("token") == token:
+                self.status_path.unlink()
+        except (OSError, json.JSONDecodeError, TypeError):
+            pass
 
     def _remove_stale(self) -> bool:
         try:
@@ -229,6 +305,7 @@ class OperationLock:
             if (current.st_ino, current.st_mtime_ns) != (original.st_ino, original.st_mtime_ns):
                 return False
             self.path.unlink()
+            self._remove_status(value.get("token"))
             return True
         except FileNotFoundError:
             return True
@@ -241,6 +318,7 @@ class OperationLock:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
             if value.get("token") == self.token:
+                self._remove_status(self.token)
                 self.path.unlink()
         except (OSError, json.JSONDecodeError):
             pass
@@ -342,6 +420,78 @@ class PackageManager:
                 elif path.is_dir():
                     shutil.rmtree(path)
             return report
+
+    def _leave_post_targets(self) -> tuple[Path, ...]:
+        """Return validated immediate children that GoinfrePM may remove."""
+        verify_install_root(self.layout.root)
+        root = self.layout.root.resolve()
+        if root in {Path("/"), Path.home().resolve()}:
+            raise RuntimeError(f"Refusing unsafe cleanup root: {root}")
+
+        owned = (
+            self.layout.apps,
+            self.layout.downloads,
+            self.layout.logs,
+            root / "venv",
+            self.layout.runtime,
+        )
+        for path in owned:
+            if path.parent.resolve() != root or path.is_symlink():
+                raise RuntimeError(f"Refusing unsafe post cleanup target: {path}")
+        return owned
+
+    def post_storage_report(self) -> PostStorageReport:
+        """Measure removable post-local data without following symlinks."""
+        owned = self._leave_post_targets()
+        entries = 0
+        for path in owned:
+            if path.is_dir():
+                try:
+                    entries += sum(1 for _item in path.iterdir())
+                except OSError:
+                    continue
+            elif path.exists():
+                entries += 1
+        return PostStorageReport(
+            total_bytes=sum(_cleanup_entry_size(path) for path in owned),
+            entries=entries,
+        )
+
+    def leave_post(self) -> LeavePostReport:
+        """Remove this post's GoinfrePM storage without touching roaming preferences."""
+        root = self.layout.root.resolve()
+        owned = self._leave_post_targets()
+        bytes_removed = sum(_cleanup_entry_size(path) for path in owned)
+        integrations_removed = 0
+        with OperationLock(self.layout):
+            installation_data = self.installations.read().get("installed", {})
+            identifiers = set(self.packages)
+            if isinstance(installation_data, dict):
+                for identifier in installation_data:
+                    if not isinstance(identifier, str):
+                        continue
+                    try:
+                        identifiers.add(validate_package_id(identifier))
+                    except ValueError:
+                        continue
+            for identifier in sorted(identifiers):
+                integrations_removed += len(remove_integration_by_identifier(identifier))
+
+            for path in owned:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                elif path.exists():
+                    raise RuntimeError(f"Storage target is not a directory: {path}")
+
+        root_removed = False
+        try:
+            root.rmdir()
+            root_removed = True
+        except OSError:
+            # A custom root may contain unrelated user files. They are never
+            # deleted merely to make the directory disappear.
+            pass
+        return LeavePostReport(bytes_removed, integrations_removed, root_removed)
 
     def package_status(self, identifier: str) -> str:
         condition = self.installation(identifier)
@@ -671,6 +821,7 @@ class PackageManager:
         lock = OperationLock(self.layout)
         wait_started = time.monotonic()
         waiting_reported = False
+        last_peer_update = 0.0
         while True:
             if cancel is not None and cancel.is_set():
                 for identifier in identifiers:
@@ -683,6 +834,16 @@ class PackageManager:
                 if not waiting_reported:
                     yield ("waiting", "Preparing your Auto Setup…")
                     waiting_reported = True
+                peer_status = lock.peer_status()
+                if peer_status is not None:
+                    try:
+                        peer_update = float(peer_status.get("updated_at", 0))
+                    except (TypeError, ValueError):
+                        peer_update = 0
+                    if peer_update > last_peer_update:
+                        last_peer_update = peer_update
+                        wait_started = time.monotonic()
+                        yield ("peer_progress", peer_status)
                 if time.monotonic() - wait_started >= max(0.0, wait_timeout):
                     raise OperationBusyError(
                         "GoinfrePM is still finishing another task on this post"
@@ -703,11 +864,36 @@ class PackageManager:
                 if not package.enabled or not package.compatible:
                     yield ("skipped", (identifier, "unavailable or incompatible"))
                     continue
+                lock.publish_status(
+                    operation="restore",
+                    phase="checking",
+                    package=identifier,
+                    package_name=package.name,
+                    index=index,
+                    total=total,
+                    progress=0,
+                )
                 condition = self.installation(identifier)
                 if condition.healthy:
-                    yield ("skipped", (identifier, "already installed here"))
+                    if waiting_reported:
+                        yield ("ready", identifier)
+                        yield (
+                            "log",
+                            f"{package.name} was completed by another GoinfrePM session",
+                        )
+                    else:
+                        yield ("skipped", (identifier, "already installed here"))
                 elif condition.status == "repairable":
                     try:
+                        lock.publish_status(
+                            operation="restore",
+                            phase="repairing",
+                            package=identifier,
+                            package_name=package.name,
+                            index=index,
+                            total=total,
+                            progress=50,
+                        )
                         self._repair(identifier)
                         yield ("restored", identifier)
                         yield ("log", f"Repaired {package.name} without downloading it again")
@@ -715,13 +901,50 @@ class PackageManager:
                         yield ("failed", (identifier, str(exc)))
                 else:
                     try:
-                        yield from self._install(
+                        def shared_progress(value: float) -> None:
+                            phase = "downloading" if value <= 40 else "extracting" if value <= 75 else "finishing"
+                            lock.publish_status(
+                                operation="restore",
+                                phase=phase,
+                                package=identifier,
+                                package_name=package.name,
+                                index=index,
+                                total=total,
+                                progress=value,
+                            )
+                            if progress_callback is not None:
+                                progress_callback(value)
+
+                        def shared_transfer(
+                            done: int,
+                            size: int | None,
+                            speed: float,
+                            eta: float | None,
+                        ) -> None:
+                            lock.publish_status(
+                                operation="restore",
+                                phase="downloading",
+                                package=identifier,
+                                package_name=package.name,
+                                index=index,
+                                total=total,
+                                progress=min(40.0, done / size * 40.0) if size else 0,
+                                downloaded=done,
+                                download_total=size,
+                                speed=speed,
+                                eta=eta,
+                            )
+                            if transfer_callback is not None:
+                                transfer_callback(done, size, speed, eta)
+
+                        for event in self._install(
                             identifier,
                             cancel,
-                            progress_callback,
-                            transfer_callback,
+                            shared_progress,
+                            shared_transfer,
                             completed_action="Restored",
-                        )
+                        ):
+                            yield event
                         yield ("restored", identifier)
                     except DownloadCancelled:
                         yield ("cancelled", identifier)

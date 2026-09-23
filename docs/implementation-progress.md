@@ -109,3 +109,22 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - Python compilation, shell syntax, npm tests, package dry-run, and whitespace checks pass.
 - Shellcheck remains unavailable locally. Ubuntu 22.04 GUI validation remains a school-workstation release check.
 - No commit, push, or npm publication has been performed.
+
+## 1.5.5 concurrent Auto Setup handoff
+
+- [x] Treat applications completed by another GoinfrePM session as ready, not skipped.
+- [x] Show which applications were installed by this window and which completed while it waited.
+- [x] Mirror the active session's current package, phase, and percentage in the waiting TUI.
+- [x] Replace the misleading restore summary with a successful Auto Setup ready result.
+- [x] Add a recommended, explicitly confirmed Leave this post cleanup in the TUI, command palette, and CLI.
+- [x] Remove only manager-owned goinfre directories and integrations while preserving roaming setup and personal profiles.
+- [x] Surface post-local usage in the header and keep Clean & leave visible in the footer.
+- [x] Offer Clean & exit, Exit without cleaning, and Cancel from the normal quit flow.
+- [x] Repeat the cleanup reminder after installs and Auto Setup restoration.
+
+### 1.5.5 validation
+
+- 140 Python tests pass on macOS, including cleanup previews, quit choices, explicit leave confirmation, and 80×24 modal boundaries.
+- Python compilation, shell syntax, npm tests, the 28-file npm dry-run package, release-version consistency, branding search, and whitespace checks pass.
+- Shellcheck remains unavailable locally. Ubuntu 22.04 GUI validation remains a school-workstation release check.
+- No commit, push, or npm publication has been performed.

@@ -140,24 +140,28 @@ def integrate(package: Package, executable: Path, package_dir: Path | None = Non
     return created
 
 
-def remove_integration(package: Package, recorded: list[str] | None = None) -> list[str]:
-    allowed_bases = (USER_BIN.resolve(), DESKTOP_DIR.resolve(), ICON_DIR.resolve())
+def remove_integration_by_identifier(identifier: str) -> list[str]:
+    """Remove only integration filenames deterministically owned by GoinfrePM."""
+    identifier = validate_package_id(identifier)
     known = [
-        _owned_path(USER_BIN, package.identifier),
-        _owned_path(DESKTOP_DIR, package.identifier, ".desktop"),
-        _owned_path(ICON_DIR, package.identifier, ".png"),
-        _owned_path(ICON_DIR, package.identifier, ".svg"),
+        _owned_path(USER_BIN, identifier),
+        _owned_path(DESKTOP_DIR, identifier, ".desktop"),
+        _owned_path(ICON_DIR, identifier, ".png"),
+        _owned_path(ICON_DIR, identifier, ".svg"),
     ]
-    for text in recorded or []:
-        path = Path(text).expanduser()
-        if any(_within(base, path) for base in allowed_bases):
-            known.append(path)
     removed: list[str] = []
-    for path in dict.fromkeys(known):
+    for path in known:
         if path.is_symlink() or path.is_file():
             path.unlink()
             removed.append(str(path))
     return removed
+
+
+def remove_integration(package: Package, recorded: list[str] | None = None) -> list[str]:
+    # Recorded paths are intentionally not trusted as deletion targets. Every
+    # integration GoinfrePM creates has a deterministic allowlisted filename.
+    _ = recorded
+    return remove_integration_by_identifier(package.identifier)
 
 
 def validate_user_data_path(path: Path, package: Package, cache: bool = False) -> Path:

@@ -357,15 +357,32 @@ def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatc
             if event[0] == "waiting":
                 waiting.set()
 
-    with OperationLock(manager.layout):
+    with OperationLock(manager.layout) as owner:
         thread = threading.Thread(target=restore)
         thread.start()
         assert waiting.wait(2)
         assert not any(kind == "failed" for kind, _value in events)
+        owner.publish_status(
+            operation="restore",
+            phase="downloading",
+            package="tool",
+            package_name="Tool",
+            index=1,
+            total=1,
+            progress=23,
+        )
+        deadline = time.time() + 2
+        while time.time() < deadline and not any(kind == "peer_progress" for kind, _value in events):
+            time.sleep(0.02)
+        peer_events = [value for kind, value in events if kind == "peer_progress"]
+        assert peer_events
+        assert peer_events[-1]["progress"] == 23
         installed = True
     thread.join(3)
     assert not thread.is_alive()
-    assert ("skipped", ("tool", "already installed here")) in events
+    assert ("ready", "tool") in events
+    assert not any(kind == "skipped" for kind, _value in events)
+    assert not (manager.layout.runtime / "operation-status.json").exists()
 
 
 def test_restore_can_cancel_while_waiting_for_other_session(tmp_path: Path) -> None:

@@ -77,6 +77,7 @@ Arguments are forwarded to GoinfrePM, so non-interactive use works too:
 ```sh
 npx --yes goinfre-pm@latest doctor
 npx --yes goinfre-pm@latest install zen-browser
+npx --yes goinfre-pm@latest leave
 ```
 
 On an ordinary interactive launch, the TUI checks Auto Setup and shows a prompt
@@ -99,6 +100,21 @@ root, and launches the code from the npm package. It does **not** create
 application payloads and the Python environment stay in goinfre. On a new
 post, the environment may need to be recreated, so the first launch needs
 PyPI access; later launches on the same post reuse it.
+
+Before leaving a shared workstation, use **Clean this post before leaving** from
+the Ctrl+P palette, press `x` in the TUI, or run:
+
+```sh
+npx goinfre-pm leave
+```
+
+This recommended manual cleanup removes GoinfrePM application payloads,
+downloads, logs, runtime files, its goinfre virtual environment, and
+manager-created launchers from the current post. It preserves the small Auto
+Setup list, theme, favorites, and ordinary application profiles in the user's
+home so the next post can be prepared again. It never purges application
+configuration or cache. Scripts may use `leave --yes`; interactive use asks
+for explicit confirmation.
 
 To deliberately install a permanent `gpm` command, use:
 
@@ -224,7 +240,8 @@ and state are not removed.
 | `w` | Reopen the welcome guide |
 | `?` | Show help |
 | `Esc` | Close search/modal or move back to categories |
-| `q` | Quit when no operation is active |
+| `x` | Clean GoinfrePM data from this post and leave |
+| `q` | Exit; when post-local data exists, choose Clean & exit, Exit without cleaning, or Cancel |
 
 The layout hides lower-priority navigation/details panels at small terminal
 widths and remains usable around 80×24. Mutating actions are blocked while a
@@ -234,6 +251,11 @@ confirmations leave user configuration intact. Download operations show bytes,
 speed, and ETA when the server supplies a total; batch operations end with a
 success/failure summary. Unknown catalog sizes are labeled unknown rather than
 guessed.
+
+The header continuously shows GoinfrePM's approximate post-local storage use
+and the `x Clean & leave` reminder. After installation and Auto Setup summaries,
+the same reminder is shown again. Cleanup never runs merely because a terminal
+closed or a user logged out.
 
 Installed applications cannot be accidentally installed again. The basket
 skips them, while `Enter` or `i` opens a concise **Launch / Update / Reinstall /
@@ -322,9 +344,18 @@ gpm path
 gpm path set <directory>
 gpm autostart enable
 gpm autostart disable
+gpm leave [--yes]
 gpm doctor
 gpm version
 ```
+
+Before leaving a shared post, press `x` in the TUI or run `npx goinfre-pm leave`.
+Both paths require explicit confirmation. Pressing `q` also offers a
+three-way choice when removable post-local data exists: **Clean & exit**,
+**Exit without cleaning**, or **Cancel**. Cleanup removes manager-owned payload,
+download, log, runtime, virtual-environment, launcher, icon, and desktop-entry
+files. It preserves the small roaming Auto Setup/theme/favorites state and does
+not delete ordinary application profiles or cache.
 
 `restore` is a compatibility shortcut for `setup restore`; both restore only
 missing Auto Setup packages. `update` resolves the catalog's current release,

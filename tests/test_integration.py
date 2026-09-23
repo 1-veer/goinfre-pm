@@ -95,6 +95,22 @@ def test_generated_integration_and_removal(monkeypatch, tmp_path: Path) -> None:
     assert not (desktop / "sample-tool.desktop").exists()
 
 
+def test_removal_does_not_trust_unrelated_recorded_launcher(monkeypatch, tmp_path: Path) -> None:
+    user_bin = tmp_path / "bin"
+    desktop = tmp_path / "applications"
+    icons = tmp_path / "icons"
+    monkeypatch.setattr("goinfre_pm.integration.USER_BIN", user_bin)
+    monkeypatch.setattr("goinfre_pm.integration.DESKTOP_DIR", desktop)
+    monkeypatch.setattr("goinfre_pm.integration.ICON_DIR", icons)
+    unrelated = user_bin / "student-script"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("keep", encoding="utf-8")
+
+    remove_integration(package(), [str(unrelated)])
+
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+
+
 def test_uninstall_path_validation_rejects_unrelated_data(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("goinfre_pm.integration.Path.home", lambda: tmp_path)
     with pytest.raises(RuntimeError):

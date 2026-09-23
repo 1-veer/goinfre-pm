@@ -50,6 +50,15 @@ def _emit(events: object) -> bool:
             print(f"Restoring Auto Setup — package {index} of {total}: {identifier}")
         elif kind == "waiting":
             print(value)
+        elif kind == "peer_progress":
+            status = value if isinstance(value, dict) else {}
+            name = status.get("package_name", "Auto Setup")
+            phase = str(status.get("phase", "preparing")).replace("_", " ").title()
+            progress = status.get("progress", 0)
+            if sys.stdout.isatty():
+                print(f"{phase}: {name} ({progress}%)", end="\r")
+        elif kind == "ready":
+            print(f"Ready {value}: completed by another GoinfrePM session")
         elif kind == "failed":
             identifier, reason = value
             print(f"Failed {identifier}: {reason}", file=sys.stderr)
@@ -135,6 +144,8 @@ def build_parser() -> argparse.ArgumentParser:
     path_set.add_argument("directory", type=Path)
     auto = sub.add_parser("autostart", help="manage optional login restore")
     auto.add_argument("mode", choices=("enable", "disable"))
+    leave = sub.add_parser("leave", help="remove GoinfrePM storage before leaving this post")
+    leave.add_argument("--yes", action="store_true", help="confirm permanent removal without prompting")
     sub.add_parser("doctor", help="diagnose installation")
     sub.add_parser("version", help="print version")
     return parser
@@ -274,6 +285,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{root}\n{_human_size(available_space(root))} free")
         elif args.command == "autostart":
             set_autostart(args.mode == "enable")
+        elif args.command == "leave":
+            manager = _manager()
+            if not args.yes:
+                if not sys.stdin.isatty():
+                    raise RuntimeError("Post cleanup needs confirmation; rerun with leave --yes")
+                print("Recommended before leaving a shared school post.")
+                print(f"This permanently removes GoinfrePM applications and runtime files from {manager.layout.root}.")
+                print("Auto Setup, themes, favorites, and ordinary application profiles are kept.")
+                if input("Type LEAVE to clean this post: ").strip() != "LEAVE":
+                    print("Post cleanup cancelled.")
+                    return 0
+            report = manager.leave_post()
+            root_result = "removed" if report.root_removed else "cleaned (unrelated files kept)"
+            print(
+                f"Post cleaned: {_human_size(report.bytes_removed)} reclaimed, "
+                f"{report.integrations_removed} integrations removed; root {root_result}."
+            )
         elif args.command == "doctor":
             return doctor()
         elif args.command == "version":
