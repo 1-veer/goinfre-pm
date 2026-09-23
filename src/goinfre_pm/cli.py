@@ -50,6 +50,8 @@ def _emit(events: object) -> bool:
             print(f"Restoring Auto Setup — package {index} of {total}: {identifier}")
         elif kind == "waiting":
             print(value)
+        elif kind == "wait_progress" and sys.stdout.isatty():
+            print(value, end="\r")
         elif kind == "peer_progress":
             status = value if isinstance(value, dict) else {}
             name = status.get("package_name", "Auto Setup")

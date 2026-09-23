@@ -710,7 +710,7 @@ class GoinfrePMApp(App[None]):
             self._set_active_pane("categories")
         self.set_timer(0.25, self._finish_startup)
         self._check_updates()
-        self._refresh_post_storage_usage()
+        self.call_after_refresh(self._refresh_post_storage_usage)
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         yield from super().get_system_commands(screen)
@@ -828,6 +828,7 @@ class GoinfrePMApp(App[None]):
         self.query_one("#tasks").styles.height = 5 if width < 82 else (6 if width < 100 else 7)
         self.query_one("#brand").styles.width = 18 if width < 82 else 22
         self.query_one("#basket-status").styles.width = 24 if width < 82 else 34
+        self.query_one("#basket-status").display = width >= 120
         self._update_storage_label()
         if width < 100 and self.query_one(OptionList).has_focus and self.visible_packages:
             self.action_focus_packages()
@@ -845,6 +846,8 @@ class GoinfrePMApp(App[None]):
             self._set_active_pane("catalog")
 
     def _refresh(self, query: str = "", preserve_identifier: str | None = None) -> None:
+        if not self.is_running or not list(self.query("#package-table")):
+            return
         installed = self.manager.installations.read().get("installed", {})
         preferences = self.state.read()
         setup = set(preferences.get("setup_packages", []))
@@ -943,10 +946,14 @@ class GoinfrePMApp(App[None]):
             if self.post_storage_bytes is not None
             else "GPM usage checking"
         )
-        separator = "\n" if self.size.width < 100 else "  •  "
-        self.query_one("#storage", Static).update(
-            f"{self.layout.root}{separator}{free_text}  ·  {usage}  ·  x Clean & leave"
-        )
+        storage_nodes = list(self.query("#storage"))
+        if not self.is_running or not storage_nodes:
+            return free_bytes
+        if self.size.width < 120:
+            label = f"{self.layout.root}\n{free_text} · {usage} · [b]x Clean & leave[/b]"
+        else:
+            label = f"{self.layout.root}  •  {free_text}  ·  {usage}  ·  [b]x Clean & leave[/b]"
+        storage_nodes[0].update(label)
         return free_bytes
 
     @work(thread=True, exclusive=True, group="storage-usage")
@@ -957,10 +964,12 @@ class GoinfrePMApp(App[None]):
             total_bytes = manager.post_storage_report().total_bytes
         except (OSError, RuntimeError):
             return
+        if not self.is_running:
+            return
         self.call_from_thread(self._show_post_storage_usage, root, total_bytes)
 
     def _show_post_storage_usage(self, root: Path, total_bytes: int) -> None:
-        if root != self.layout.root:
+        if not self.is_running or not self.is_mounted or root != self.layout.root:
             return
         self.post_storage_bytes = total_bytes
         self._update_storage_label()
@@ -1300,6 +1309,7 @@ class GoinfrePMApp(App[None]):
     def _leave_post_confirmed(self, confirmed: bool) -> None:
         if not confirmed or self.busy:
             return
+        self.workers.cancel_group(self, "storage-usage")
         self.busy = True
         self.query_one("#operation", Static).update("Cleaning this post…")
         self._leave_post_worker()
@@ -1558,6 +1568,8 @@ class GoinfrePMApp(App[None]):
                 if kind == "waiting":
                     self.call_from_thread(self.query_one("#operation", Static).update, str(value))
                     self.call_from_thread(self.query_one(RichLog).write, str(value))
+                elif kind == "wait_progress":
+                    self.call_from_thread(self.query_one("#operation", Static).update, str(value))
                 elif kind == "peer_progress":
                     status = value if isinstance(value, dict) else {}
                     identifier = str(status.get("package", ""))

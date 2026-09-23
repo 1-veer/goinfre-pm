@@ -97,6 +97,17 @@ def _current_boot_id() -> str:
         return ""
 
 
+def _linux_process_start(pid: int) -> str:
+    """Return Linux's per-boot process start tick, or an empty string."""
+    try:
+        # Field 22 follows the parenthesized process name. Splitting at the
+        # final closing parenthesis also handles spaces or parentheses in it.
+        fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").rsplit(") ", 1)[1].split()
+        return fields[19]
+    except (OSError, IndexError):
+        return ""
+
+
 def _cleanup_entry_size(path: Path) -> int:
     try:
         if path.is_symlink():
@@ -168,6 +179,7 @@ class OperationLock:
         self.token = uuid.uuid4().hex
         self.hostname = socket.gethostname()
         self.boot_id = _current_boot_id()
+        self.process_start = _linux_process_start(os.getpid())
         self.acquired = False
 
     def __enter__(self) -> "OperationLock":
@@ -186,6 +198,7 @@ class OperationLock:
                     "created_at": time.time(),
                     "hostname": self.hostname,
                     "boot_id": self.boot_id,
+                    "process_start": self.process_start,
                 }
             )
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
@@ -273,6 +286,7 @@ class OperationLock:
             created_at = float(value.get("created_at", 0))
         except (TypeError, ValueError):
             created_at = 0
+        recorded_process_start = str(value.get("process_start", ""))
 
         # Goinfre follows the user between school posts, but PIDs do not. A
         # lock from a different hostname or Linux boot is always stale even if
@@ -292,7 +306,13 @@ class OperationLock:
             and time.time() - created_at >= 2 * 60 * 60
         )
 
-        if not different_post and not legacy_lock_expired and pid > 0:
+        pid_still_owns_lock = True
+        if recorded_process_start and pid > 0:
+            live_process_start = _linux_process_start(pid)
+            if live_process_start and live_process_start != recorded_process_start:
+                pid_still_owns_lock = False
+
+        if not different_post and not legacy_lock_expired and pid > 0 and pid_still_owns_lock:
             try:
                 os.kill(pid, 0)
                 return False
@@ -820,6 +840,8 @@ class PackageManager:
         identifiers = [item for item in raw_identifiers if isinstance(item, str) and item in setup]
         lock = OperationLock(self.layout)
         wait_started = time.monotonic()
+        total_wait_started = wait_started
+        last_wait_notice = wait_started
         waiting_reported = False
         last_peer_update = 0.0
         while True:
@@ -832,7 +854,11 @@ class PackageManager:
                 break
             except OperationBusyError:
                 if not waiting_reported:
-                    yield ("waiting", "Preparing your Auto Setup…")
+                    yield (
+                        "waiting",
+                        "Auto Setup is already running elsewhere. Keep this window open; "
+                        "no second terminal is needed.",
+                    )
                     waiting_reported = True
                 peer_status = lock.peer_status()
                 if peer_status is not None:
@@ -844,6 +870,13 @@ class PackageManager:
                         last_peer_update = peer_update
                         wait_started = time.monotonic()
                         yield ("peer_progress", peer_status)
+                elif time.monotonic() - last_wait_notice >= 1:
+                    last_wait_notice = time.monotonic()
+                    waited = max(1, round(last_wait_notice - total_wait_started))
+                    yield (
+                        "wait_progress",
+                        f"Auto Setup is running in another process · waiting {waited}s",
+                    )
                 if time.monotonic() - wait_started >= max(0.0, wait_timeout):
                     raise OperationBusyError(
                         "GoinfrePM is still finishing another task on this post"

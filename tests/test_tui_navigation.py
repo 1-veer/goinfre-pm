@@ -658,6 +658,28 @@ def test_quit_offers_cleanup_only_when_post_has_data(monkeypatch, tmp_path) -> N
     asyncio.run(scenario())
 
 
+def test_storage_usage_callback_tolerates_header_teardown(monkeypatch, tmp_path) -> None:
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    root = tmp_path / "goinfre-pm"
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: root)
+    monkeypatch.setattr(app_module, "load_packages", lambda: _packages()[:1])
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause(0.3)
+            await app.query_one("#storage").remove()
+            app._show_post_storage_usage(root, 4096)
+            assert app._update_storage_label() >= 0
+
+        # A late thread result after shutdown must also be harmless.
+        app._show_post_storage_usage(root, 8192)
+
+    asyncio.run(scenario())
+
+
 def test_packs_basket_favorites_sort_and_doctor_are_keyboard_accessible(monkeypatch, tmp_path) -> None:
     packages = _packages()
     state = StateStore(tmp_path / "state.json")
@@ -792,6 +814,8 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             await pilot.pause(0.3)
             assert not narrow.query_one("#categories").display
             assert not narrow.query_one("#details").display
+            assert not narrow.query_one("#basket-status").display
+            assert "x Clean & leave" in str(narrow.query_one("#storage").renderable)
             assert narrow.query_one(DataTable).display
             assert narrow.query_one(DataTable).has_focus
             await pilot.press("t")

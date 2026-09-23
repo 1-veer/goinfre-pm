@@ -128,3 +128,18 @@ This file records recoverable checkpoints for the student-experience upgrade.
 - Python compilation, shell syntax, npm tests, the 28-file npm dry-run package, release-version consistency, branding search, and whitespace checks pass.
 - Shellcheck remains unavailable locally. Ubuntu 22.04 GUI validation remains a school-workstation release check.
 - No commit, push, or npm publication has been performed.
+
+## 1.5.6 startup and cleanup lifecycle hardening
+
+- [x] Ignore late storage-usage results after Textual has started tearing down its widgets.
+- [x] Cancel the storage measurement worker before deleting the current post runtime.
+- [x] Keep Clean & leave visible at approximately 80×24 by hiding the lower-priority basket summary.
+- [x] Replace the static Auto Setup waiting line with a clear other-session message and elapsed wait updates.
+- [x] Detect same-post stale locks when Linux has reused the recorded PID.
+
+### 1.5.6 validation
+
+- 143 Python tests pass on macOS, including late-worker teardown, narrow cleanup visibility, lock wait heartbeats, and same-post PID reuse.
+- Python compilation, shell syntax, npm tests, the 28-file npm dry-run package, release-version consistency, branding search, and whitespace checks pass.
+- Shellcheck remains unavailable locally. The Ubuntu 22.04 GUI remains a final school-workstation release check.
+- No commit, push, or npm publication has been performed.

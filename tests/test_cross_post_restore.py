@@ -1,11 +1,12 @@
 from pathlib import Path
 import os
+import socket
 import threading
 import time
 
 import pytest
 
-from goinfre_pm import integration
+from goinfre_pm import installer as installer_module, integration
 from goinfre_pm.downloader import DownloadCancelled
 from goinfre_pm.installer import InstallationCheck, OperationBusyError, OperationLock, PackageManager
 from goinfre_pm.models import InstalledPackage, Package
@@ -335,9 +336,27 @@ def test_restore_times_out_cleanly_when_real_operation_stays_active(tmp_path: Pa
 
     with OperationLock(manager.layout):
         events = manager.restore(wait_timeout=0)
-        assert next(events) == ("waiting", "Preparing your Auto Setup…")
+        assert next(events) == (
+            "waiting",
+            "Auto Setup is already running elsewhere. Keep this window open; "
+            "no second terminal is needed.",
+        )
         with pytest.raises(OperationBusyError, match="still finishing another task"):
             next(events)
+
+
+def test_restore_reports_wait_time_when_owner_has_no_progress(tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+
+    with OperationLock(manager.layout):
+        events = manager.restore(wait_timeout=2)
+        assert next(events)[0] == "waiting"
+        kind, message = next(events)
+        assert kind == "wait_progress"
+        assert "waiting 1s" in str(message)
 
 
 def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatch, tmp_path: Path) -> None:
@@ -425,4 +444,21 @@ def test_new_lock_without_metadata_is_not_mistaken_for_stale(tmp_path: Path) -> 
     os.utime(lock_file, (old, old))
     with OperationLock(layout):
         pass
+    assert not lock_file.exists()
+
+
+def test_operation_lock_discards_reused_pid_on_same_post(monkeypatch, tmp_path: Path) -> None:
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    layout.create()
+    lock_file = layout.runtime / "operation.lock"
+    lock_file.write_text(
+        '{"pid": %d, "token": "old", "created_at": %f, '
+        '"hostname": "%s", "boot_id": "%s", "process_start": "old-start"}'
+        % (os.getpid(), time.time(), socket.gethostname(), installer_module._current_boot_id()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer_module, "_linux_process_start", lambda _pid: "new-start")
+
+    with OperationLock(layout):
+        assert lock_file.exists()
     assert not lock_file.exists()

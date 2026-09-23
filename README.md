@@ -307,7 +307,12 @@ current session and may be retried on the next launch or with `gpm setup
 restore`. A root-local lock prevents overlapping changes. If another session
 (including optional login autostart) is already restoring apps, Auto Setup waits
 and then checks what is still missing; it does not report the lock as a package
-failure. You can cancel while waiting with `c`.
+failure. The task panel identifies the other process, says that no second
+terminal is needed, updates the wait time when
+exact progress is unavailable, and mirrors package progress from current
+GoinfrePM versions. You can cancel while waiting with `c`. If you previously
+enabled login autostart but now prefer the interactive prompt, run `npx
+goinfre-pm autostart disable` once.
 
 Press `Ctrl+P` and choose **Theme: Purple**, **Green**, **Blue**, **Black**, or
 **Red**, plus **Light mode** or **Dark mode**. Purple and dark mode are the
