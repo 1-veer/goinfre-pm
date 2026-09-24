@@ -46,7 +46,12 @@ def _fake_venv_python(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         '#!/bin/sh\n'
-        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then exit 0; fi\n'
+        'if [ "$1" = "-m" ] && [ "$2" = "pip" ]; then\n'
+        '  if [ -n "${GPM_TEST_PIP_NOISE:-}" ]; then\n'
+        '    printf "Collecting noisy-package\\nSuccessfully installed noisy-package\\n"\n'
+        '  fi\n'
+        '  exit 0\n'
+        'fi\n'
         'if [ "$1" = "-c" ]; then exit 0; fi\n'
         'if [ -n "${GPM_TEST_RUN_LOG:-}" ]; then\n'
         '  printf "%s\\n" "$@" > "$GPM_TEST_RUN_LOG"\n'
@@ -84,6 +89,41 @@ def test_npx_run_mode_keeps_python_in_goinfre_without_creating_gpm(tmp_path: Pat
     assert log.read_text().splitlines()[:3] == ["-m", "goinfre_pm", "list"]
     assert f"packages={project / 'packages.toml'}" in log.read_text()
     assert f"pythonpath={project / 'src'}" in log.read_text()
+
+
+def test_npx_run_mode_keeps_dependency_noise_in_bootstrap_log(tmp_path: Path) -> None:
+    project = Path(__file__).parents[1]
+    home = tmp_path / "home"
+    home.mkdir()
+    root = tmp_path / "goinfre-pm"
+    _fake_venv_python(root / "venv" / "bin" / "python")
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "GPM_INSTALL_ROOT": str(root),
+        "GPM_TEST_PIP_NOISE": "1",
+    }
+
+    result = subprocess.run(
+        ["sh", str(project / "install.sh"), "run", "version"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Collecting noisy-package" not in result.stdout
+    assert "Successfully installed noisy-package" not in result.stdout
+    assert "Collecting noisy-package" not in result.stderr
+    assert "Successfully installed noisy-package" not in result.stderr
+    assert "Installing required components (first launch only)" in result.stdout
+    assert "Installed: private Python environment and GoinfrePM interface" in result.stdout
+    assert "Made by VEER" in result.stdout
+    assert f"Full setup details: {root / 'logs' / 'bootstrap.log'}" in result.stdout
+    details = (root / "logs" / "bootstrap.log").read_text(encoding="utf-8")
+    assert "Collecting noisy-package" in details
+    assert "Successfully installed noisy-package" in details
 
 
 def test_explicit_installer_still_creates_persistent_gpm(tmp_path: Path) -> None:

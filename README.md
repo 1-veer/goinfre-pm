@@ -101,7 +101,10 @@ root, and launches the code from the npm package. It does **not** create
 `~/.config/goinfre-pm`. npm itself may cache the small package under `~/.npm`;
 application payloads and the Python environment stay in goinfre. On a new
 post, the environment may need to be recreated, so the first launch needs
-PyPI access; later launches on the same post reuse it.
+PyPI access; later launches on the same post reuse it. The bootstrap prints
+only a few friendly status lines. Detailed Python environment and dependency
+output is saved to `<selected-root>/logs/bootstrap.log`; any setup failure
+prints that exact path.
 
 Before leaving a shared workstation, use **Clean this post before leaving** from
 the Ctrl+P palette, press `x` in the TUI, or run:

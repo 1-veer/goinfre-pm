@@ -23,7 +23,18 @@ fi
 info() { printf "%b[%s]%b %s\n" "$VIOLET" "$PROJECT_DISPLAY_NAME" "$RESET" "$1"; }
 ok() { printf "%b[OK]%b %s\n" "$GREEN" "$RESET" "$1"; }
 warn() { printf "%b[WARN]%b %s\n" "$AMBER" "$RESET" "$1" >&2; }
-die() { printf "%b[ERROR]%b %s\n" "$RED" "$RESET" "$1" >&2; exit 1; }
+die() {
+    printf "%b[ERROR]%b %s\n" "$RED" "$RESET" "$1" >&2
+    if [ -n "${BOOTSTRAP_LOG:-}" ]; then
+        printf 'Full setup details: %s\n' "$BOOTSTRAP_LOG" >&2
+    fi
+    exit 1
+}
+log_note() {
+    if [ -n "${BOOTSTRAP_LOG:-}" ]; then
+        printf '%s\n' "$1" >> "$BOOTSTRAP_LOG"
+    fi
+}
 
 # Keep the comparatively small manager available when campus goinfre storage
 # changes. Downloaded/extracted applications remain in the selected goinfre root.
@@ -87,8 +98,8 @@ download_pip_wheel() {
         return
     fi
     rm -f "$PIP_BOOTSTRAP_WHEEL"
-    info "Downloading the verified private pip bootstrap"
-    if ! python3 - "$PIP_BOOTSTRAP_URL" "$PIP_BOOTSTRAP_WHEEL" "$PIP_BOOTSTRAP_SHA256" "$PROJECT_DISPLAY_NAME/$PROJECT_VERSION" <<'PY'
+    log_note "Downloading and verifying the private pip bootstrap"
+    if ! python3 - "$PIP_BOOTSTRAP_URL" "$PIP_BOOTSTRAP_WHEEL" "$PIP_BOOTSTRAP_SHA256" "$PROJECT_DISPLAY_NAME/$PROJECT_VERSION" >> "$BOOTSTRAP_LOG" 2>&1 <<'PY'
 import hashlib
 import os
 from pathlib import Path
@@ -133,10 +144,14 @@ ensure_private_pip() {
     if "$MANAGER_VENV/bin/python" -m pip --version >/dev/null 2>&1; then
         return
     fi
-    info "Repairing the private Python environment without sudo"
+    if [ "${SETUP_UPDATED:-0}" = "0" ]; then
+        info "Preparing private Python tools (first launch only)"
+    fi
+    SETUP_UPDATED=1
+    log_note "Bootstrapping pip $PIP_BOOTSTRAP_VERSION inside the private environment"
     download_pip_wheel
     PYTHONPATH=$PIP_BOOTSTRAP_WHEEL "$MANAGER_VENV/bin/python" -m pip install \
-        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" \
+        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" >> "$BOOTSTRAP_LOG" 2>&1 \
         || die "Failed to bootstrap pip inside the private environment."
 }
 
@@ -221,14 +236,28 @@ if [ ! -f "$SCRIPT_DIR/pyproject.toml" ] || [ ! -f "$SCRIPT_DIR/packages.toml" ]
     die "Run this installer from a complete local checkout of $PROJECT_REPOSITORY"
 fi
 
-info "Install root: $GPM_ROOT"
-info "Available space: $((FREE_KB / 1024)) MiB"
-
 mkdir -p "$MANAGER_RUNTIME"
+BOOTSTRAP_LOG=$GPM_ROOT/logs/bootstrap.log
+: > "$BOOTSTRAP_LOG" || die "Could not create the setup log."
+chmod 600 "$BOOTSTRAP_LOG" 2>/dev/null || true
+{
+    printf '%s %s setup log\n' "$PROJECT_DISPLAY_NAME" "$PROJECT_VERSION"
+    printf 'Started: '
+    date -u '+%Y-%m-%dT%H:%M:%SZ'
+    printf 'Install root: %s\n' "$GPM_ROOT"
+    printf 'Available space: %s MiB\n\n' "$((FREE_KB / 1024))"
+} >> "$BOOTSTRAP_LOG"
+
+info "Preparing $PROJECT_DISPLAY_NAME $PROJECT_VERSION"
+ok "Storage ready: $GPM_ROOT ($((FREE_KB / 1024)) MiB free)"
+SETUP_UPDATED=0
 
 if [ ! -x "$MANAGER_VENV/bin/python" ]; then
-    info "Creating private Python environment in $MANAGER_VENV"
-    python3 -m venv --without-pip "$MANAGER_VENV" || die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
+    info "Creating a private Python environment (first launch only)"
+    SETUP_UPDATED=1
+    log_note "Creating private Python environment: $MANAGER_VENV"
+    python3 -m venv --without-pip "$MANAGER_VENV" >> "$BOOTSTRAP_LOG" 2>&1 \
+        || die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
 fi
 ensure_private_pip
 
@@ -244,23 +273,35 @@ if [ "$RUN_ONCE" = "1" ]; then
     if [ ! -f "$REQUIREMENTS_MARKER" ] || [ "$(sed -n '1p' "$REQUIREMENTS_MARKER")" != "$REQUIREMENTS_HASH" ] \
         || ! "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1 \
         || ! "$MANAGER_VENV/bin/python" -m pip check >/dev/null 2>&1; then
-        info "Installing pinned Python dependencies in goinfre"
+        info "Installing required components (first launch only)"
+        SETUP_UPDATED=1
+        log_note "Installing pinned Python dependencies from requirements.txt"
         rm -f "$REQUIREMENTS_MARKER"
         "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" \
+            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1 \
             || die "Could not install Python dependencies in goinfre. Check the network and retry."
         printf '%s\n' "$REQUIREMENTS_HASH" > "$REQUIREMENTS_MARKER"
+    else
+        log_note "Pinned Python dependencies are already ready"
     fi
     save_root
     GPM_PACKAGES_FILE=${GPM_PACKAGES_FILE:-$SCRIPT_DIR/packages.toml}
     PYTHONPATH=$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}
     export GPM_PACKAGES_FILE PYTHONPATH
+    if [ "$SETUP_UPDATED" = "1" ]; then
+        ok "Installed: private Python environment and $PROJECT_DISPLAY_NAME interface"
+    else
+        ok "$PROJECT_DISPLAY_NAME is ready (existing setup reused)"
+    fi
+    info "Full setup details: $BOOTSTRAP_LOG"
+    printf "%b%s%b\n\n" "$BOLD$VIOLET" "$PROJECT_SIGNATURE" "$RESET"
     exec "$MANAGER_VENV/bin/python" -m "$PROJECT_MODULE" "$@"
 fi
 
 info "Installing pinned dependencies and project files"
+log_note "Installing pinned dependencies and project files"
 if ! "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-    --no-cache-dir --timeout 20 --retries 2 --upgrade "$SCRIPT_DIR"; then
+    --no-cache-dir --timeout 20 --retries 2 --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1; then
     if "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
         warn "PyPI is unreachable; reusing dependencies and updating local project files only."
     else
@@ -322,3 +363,5 @@ ok "Persistent manager: $MANAGER_HOME"
 ok "Large storage: $GPM_ROOT"
 printf 'Open a new terminal, then run: %b%s%b\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"
 printf 'Auto Setup runs visibly when you launch %b%s%b; background login restore is retired.\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"
+info "Full setup details: $BOOTSTRAP_LOG"
+printf "%b%s%b\n" "$BOLD$VIOLET" "$PROJECT_SIGNATURE" "$RESET"

@@ -141,7 +141,7 @@ if (!fs.existsSync(installer)) {
 }
 
 if (!installManager) {
-  info("Running without installing a permanent gpm command or changing shell settings.");
+  info("Run-only mode — no permanent command or shell changes.");
   finish(run("sh", [installer, "run", ...args], { stdio: "inherit", env: process.env }), `run ${displayName}`);
   process.exit(0);
 }
