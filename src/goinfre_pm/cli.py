@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import os
 import sys
 
 from .branding import COMMAND, DISPLAY_NAME, SLUG, VERSION
 from .config import ConfigurationError, load_packages
 from .doctor import collect_doctor_checks
 from .errors import error_text, write_crash_log
-from .integration import AUTOSTART_DIR, USER_BIN
+from .integration import AUTOSTART_DIR
 from .installer import PackageManager
 from .models import validate_package_id
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root, verify_install_root
@@ -78,23 +77,31 @@ def _autostart_path() -> Path:
     return AUTOSTART_DIR / f"{SLUG}-restore.desktop"
 
 
+def retire_background_autostart() -> bool:
+    """Remove the obsolete background restore that can race the visible TUI."""
+    path = _autostart_path()
+    state = StateStore()
+    data = state.read()
+    retired = path.exists() or bool(data.get("autostart"))
+    path.unlink(missing_ok=True)
+    if data.get("autostart"):
+        data["autostart"] = False
+        state.write(data)
+    return retired
+
+
 def set_autostart(enabled: bool) -> None:
     path = _autostart_path()
     state = StateStore()
     data = state.read()
     if enabled:
-        command_path = USER_BIN / COMMAND
-        if not command_path.is_file() or not os.access(command_path, os.X_OK):
-            raise RuntimeError("Autostart needs a permanent gpm command. Run `npx goinfre-pm --install-manager` first.")
-        command = str(command_path)
-        desktop_command = '"' + command.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
-        AUTOSTART_DIR.mkdir(parents=True, exist_ok=True)
-        content = "\n".join([
-            "[Desktop Entry]", "Type=Application", f"Name={DISPLAY_NAME} Restore",
-            f"Exec={desktop_command} restore", "Terminal=false", "X-GNOME-Autostart-enabled=true", "",
-        ])
-        path.write_text(content, encoding="utf-8")
-        path.chmod(0o755)
+        path.unlink(missing_ok=True)
+        data["autostart"] = False
+        state.write(data)
+        raise RuntimeError(
+            "Background login restore was retired because it can race the visible Auto Setup. "
+            "Launch GoinfrePM normally and approve the Auto Setup prompt instead."
+        )
     else:
         path.unlink(missing_ok=True)
     data["autostart"] = enabled
@@ -192,8 +199,9 @@ def main(argv: list[str] | None = None) -> int:
                 if not is_writable_directory(chosen, create=True):
                     raise RuntimeError(f"Path is not writable: {chosen}")
                 persist_root(chosen)
+            retired_autostart = retire_background_autostart()
             from .app import run_tui
-            run_tui(auto_restore=not args.no_restore)
+            run_tui(auto_restore=not args.no_restore, retired_autostart=retired_autostart)
         elif args.command == "list":
             _print_packages()
         elif args.command == "search":

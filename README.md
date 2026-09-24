@@ -82,7 +82,9 @@ npx --yes goinfre-pm@latest leave
 
 On an ordinary interactive launch, the TUI checks Auto Setup and shows a prompt
 listing every app that is not ready on the current post. Nothing is installed
-until the user chooses **Install now**. To skip that startup check once:
+until the user chooses **Install now**. The same window then stays open and
+shows each app moving through waiting, download, installation, and ready or
+failed states. To skip that startup check once:
 
 ```sh
 npx --yes goinfre-pm@latest --no-restore
@@ -146,8 +148,8 @@ npx --yes goinfre-pm@latest --uninstall-manager
 
 Upgrading from an older release does not silently remove an existing `gpm`
 launcher or its shell PATH lines; use this explicit removal command if you
-want to switch fully to run-only mode. If you enabled login autostart, disable
-it first with `npx goinfre-pm autostart disable`.
+want to switch fully to run-only mode. Version 1.5.8 retires and removes the old
+login-autostart entry automatically because it could race the visible Auto Setup.
 
 ## Prerequisites
 
@@ -296,23 +298,24 @@ package as **Installed here**, **Repair needed**, or **Not installed here**. A
 home-directory profile (for example Zen Browser's settings) is not installation
 evidence. If any Auto Setup apps are absent or need repair, a modal lists their
 names and asks **Set up this post?** Choose **Install now** to continue or **Not
-now** to open GoinfrePM without changing application files. Confirmed apps are
-handled sequentially in the task panel, with package count, progress, logs,
-cancellation, and a final success/failure/skipped summary. Healthy payloads are
+now** to open GoinfrePM without changing application files. After confirmation,
+that same modal becomes the live installer: apps are handled sequentially with
+per-app state, progress, safe cancellation, and a final success/failure/skipped summary. Detailed logs
+also remain available in the task panel. Healthy payloads are
 never redownloaded or automatically updated; broken integration is repaired
 without downloading.
 
 Failures do not stop later packages. They are shown as Auto-install failed for the
 current session and may be retried on the next launch or with `gpm setup
 restore`. A root-local lock prevents overlapping changes. If another session
-(including optional login autostart) is already restoring apps, Auto Setup waits
-and then checks what is still missing; it does not report the lock as a package
-failure. The task panel identifies the other process, says that no second
-terminal is needed, updates the wait time when
-exact progress is unavailable, and mirrors package progress from current
-GoinfrePM versions. You can cancel while waiting with `c`. If you previously
-enabled login autostart but now prefer the interactive prompt, run `npx
-goinfre-pm autostart disable` once.
+is already restoring apps, Auto Setup waits and then checks what is still
+missing; it does not report the lock as a package failure. A visible progress
+window remains open for the complete operation, mirrors package progress when
+available, and clearly says when it is waiting. It does not give up after an
+arbitrary 30-second timeout: once the earlier safe operation exits, this window
+automatically installs anything still missing. You can cancel safely while
+waiting. Old login-autostart entries are removed when the new manager launches so this
+background race cannot return.
 
 Press `Ctrl+P` and choose **Theme: Purple**, **Green**, **Blue**, **Black**, or
 **Red**, plus **Light mode** or **Dark mode**. Purple and dark mode are the
@@ -347,7 +350,6 @@ gpm setup disable
 gpm --no-restore
 gpm path
 gpm path set <directory>
-gpm autostart enable
 gpm autostart disable
 gpm leave [--yes]
 gpm doctor
@@ -372,9 +374,9 @@ Normal removal also removes the package from Auto Setup so it does not return on
 the next launch. The TUI offers **Remove + forget**, **Keep in Auto Setup**, and
 Cancel; CLI users can request the second behavior with `--keep-setup`.
 Configuration and cache purge remain separate explicit allowlisted options.
-Login autostart is unrelated to Auto Setup and remains disabled by default.
-It requires a real permanent `gpm` command; run-only npx users are told to
-install the manager explicitly before enabling it.
+Background login restore is retired because an invisible process could race the
+interactive Auto Setup. `autostart disable` remains as an idempotent cleanup
+command; `autostart enable` now explains why the visible prompt should be used.
 
 ## Package catalog
 

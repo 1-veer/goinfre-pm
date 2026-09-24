@@ -108,6 +108,20 @@ def _linux_process_start(pid: int) -> str:
         return ""
 
 
+def _linux_process_command(pid: int) -> str:
+    """Return a readable Linux command line for stale legacy-lock checks."""
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        return raw.replace(b"\0", b" ").decode("utf-8", errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def _is_goinfre_process(command: str) -> bool:
+    folded = command.casefold()
+    return "goinfre_pm" in folded or "goinfre-pm" in folded or "gpm restore" in folded
+
+
 def _cleanup_entry_size(path: Path) -> int:
     try:
         if path.is_symlink():
@@ -310,6 +324,13 @@ class OperationLock:
         if recorded_process_start and pid > 0:
             live_process_start = _linux_process_start(pid)
             if live_process_start and live_process_start != recorded_process_start:
+                pid_still_owns_lock = False
+        elif pid > 0:
+            # Releases before process_start was recorded could leave a lock
+            # whose PID was later reused by an unrelated program. Only discard
+            # it when /proc positively identifies that unrelated owner.
+            live_command = _linux_process_command(pid)
+            if live_command and not _is_goinfre_process(live_command):
                 pid_still_owns_lock = False
 
         if not different_post and not legacy_lock_expired and pid > 0 and pid_still_owns_lock:
@@ -832,7 +853,7 @@ class PackageManager:
         identifiers: list[str] | None = None,
         progress_callback: Callable[[float], None] | None = None,
         transfer_callback: Callable[[int, int | None, float, float | None], None] | None = None,
-        wait_timeout: float = 30.0,
+        wait_timeout: float | None = None,
     ) -> Iterator[Event]:
         verify_install_root(self.layout.root)
         raw_identifiers = self.state.read().get("setup_packages", []) if identifiers is None else identifiers
@@ -856,8 +877,8 @@ class PackageManager:
                 if not waiting_reported:
                     yield (
                         "waiting",
-                        "Auto Setup is already running elsewhere. Keep this window open; "
-                        "no second terminal is needed.",
+                        "An earlier GoinfrePM task is finishing on this post. Keep this "
+                        "window open; it will continue with anything still missing.",
                     )
                     waiting_reported = True
                 peer_status = lock.peer_status()
@@ -875,14 +896,23 @@ class PackageManager:
                     waited = max(1, round(last_wait_notice - total_wait_started))
                     yield (
                         "wait_progress",
-                        f"Auto Setup is running in another process · waiting {waited}s",
+                        f"Waiting for the earlier task · {waited}s · this window will continue automatically",
                     )
-                if time.monotonic() - wait_started >= max(0.0, wait_timeout):
+                if wait_timeout is not None and time.monotonic() - wait_started >= max(0.0, wait_timeout):
                     raise OperationBusyError(
                         "GoinfrePM is still finishing another task on this post"
                     )
                 time.sleep(0.5)
         try:
+            lock.publish_status(
+                operation="restore",
+                phase="preparing",
+                package="",
+                package_name="Auto Setup",
+                index=0,
+                total=len(identifiers),
+                progress=0,
+            )
             total = len(identifiers)
             for index, identifier in enumerate(identifiers, 1):
                 if cancel is not None and cancel.is_set():

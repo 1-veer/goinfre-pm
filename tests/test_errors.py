@@ -68,47 +68,48 @@ def test_cli_keeps_install_and_update_as_distinct_operations(monkeypatch) -> Non
 
 
 def test_no_restore_is_forwarded_only_to_interactive_tui(monkeypatch, tmp_path) -> None:
-    calls: list[bool] = []
+    calls: list[tuple[bool, bool]] = []
+    state = StateStore(tmp_path / "state.json")
     monkeypatch.setattr(cli, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
-    monkeypatch.setattr(app_module, "run_tui", lambda auto_restore=True: calls.append(auto_restore))
+    monkeypatch.setattr(cli, "StateStore", lambda: state)
+    monkeypatch.setattr(cli, "AUTOSTART_DIR", tmp_path / "autostart")
+    monkeypatch.setattr(
+        app_module,
+        "run_tui",
+        lambda auto_restore=True, retired_autostart=False: calls.append((auto_restore, retired_autostart)),
+    )
 
     assert cli.main(["--no-restore"]) == 0
-    assert calls == [False]
+    assert calls == [(False, False)]
     assert cli.main(["version"]) == 0
-    assert calls == [False]
+    assert calls == [(False, False)]
 
 
-def test_autostart_requires_a_real_persistent_command(monkeypatch, tmp_path, capsys) -> None:
+def test_background_autostart_enable_is_retired(monkeypatch, tmp_path, capsys) -> None:
     state = StateStore(tmp_path / "state.json")
     monkeypatch.setattr(cli, "StateStore", lambda: state)
     monkeypatch.setattr(cli, "AUTOSTART_DIR", tmp_path / "autostart")
-    monkeypatch.setattr(cli, "USER_BIN", tmp_path / "bin")
-    ephemeral = tmp_path / "npm-cache" / "gpm"
-    ephemeral.parent.mkdir()
-    ephemeral.write_text("#!/bin/sh\n", encoding="utf-8")
-    ephemeral.chmod(0o755)
-    monkeypatch.setenv("PATH", str(ephemeral.parent))
 
     assert cli.main(["autostart", "enable"]) == 1
-    assert "--install-manager" in capsys.readouterr().err
+    assert "background login restore was retired" in capsys.readouterr().err.casefold()
     assert state.read()["autostart"] is False
     assert not (tmp_path / "autostart").exists()
 
 
-def test_autostart_accepts_explicit_local_manager(monkeypatch, tmp_path) -> None:
+def test_interactive_startup_removes_legacy_autostart(monkeypatch, tmp_path) -> None:
     state = StateStore(tmp_path / "state.json")
-    launcher = tmp_path / "bin" / "gpm"
-    launcher.parent.mkdir()
-    launcher.write_text("#!/bin/sh\n", encoding="utf-8")
-    launcher.chmod(0o755)
+    data = state.read()
+    data["autostart"] = True
+    state.write(data)
+    autostart = tmp_path / "autostart" / "goinfre-pm-restore.desktop"
+    autostart.parent.mkdir()
+    autostart.write_text("legacy", encoding="utf-8")
     monkeypatch.setattr(cli, "StateStore", lambda: state)
-    monkeypatch.setattr(cli, "AUTOSTART_DIR", tmp_path / "autostart")
-    monkeypatch.setattr(cli, "USER_BIN", launcher.parent)
+    monkeypatch.setattr(cli, "AUTOSTART_DIR", autostart.parent)
 
-    assert cli.main(["autostart", "enable"]) == 0
-    desktop = tmp_path / "autostart" / "goinfre-pm-restore.desktop"
-    assert f'Exec="{launcher}" restore' in desktop.read_text(encoding="utf-8")
-    assert state.read()["autostart"] is True
+    assert cli.retire_background_autostart() is True
+    assert not autostart.exists()
+    assert state.read()["autostart"] is False
 
 
 def test_leave_cli_requires_confirmation_and_supports_explicit_yes(monkeypatch, tmp_path, capsys) -> None:

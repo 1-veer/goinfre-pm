@@ -30,6 +30,14 @@ die() { printf "%b[ERROR]%b %s\n" "$RED" "$RESET" "$1" >&2; exit 1; }
 MANAGER_HOME=$HOME/.local/share/$PROJECT_SLUG
 MANAGER_VENV=$MANAGER_HOME/venv
 MANAGER_RUNTIME=$MANAGER_HOME/runtime
+LEGACY_AUTOSTART=$HOME/.config/autostart/$PROJECT_SLUG-restore.desktop
+
+# Background restore was retired in 1.5.8 because it could race the visible
+# Auto Setup. Remove only the exact manager-owned desktop entry.
+if [ -e "$LEGACY_AUTOSTART" ] || [ -L "$LEGACY_AUTOSTART" ]; then
+    rm -f "$LEGACY_AUTOSTART"
+    info "Removed the old background Auto Setup entry"
+fi
 
 # Removing the local manager must still work if goinfre or a system extraction
 # tool is unavailable. Application data and state are deliberately retained.
@@ -313,4 +321,4 @@ ok "Command: $LAUNCHER"
 ok "Persistent manager: $MANAGER_HOME"
 ok "Large storage: $GPM_ROOT"
 printf 'Open a new terminal, then run: %b%s%b\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"
-printf 'Optional login restore: %b%s autostart enable%b\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"
+printf 'Auto Setup runs visibly when you launch %b%s%b; background login restore is retired.\n' "$BOLD" "$PROJECT_COMMAND" "$RESET"

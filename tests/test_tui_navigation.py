@@ -541,8 +541,18 @@ def test_auto_setup_mirrors_another_sessions_progress(monkeypatch, tmp_path) -> 
         app.manager.restore = followed_restore  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.4)
+            prompt = app.screen
+            assert isinstance(prompt, app_module.AutoSetupPromptModal)
             await pilot.press("enter")
             await pilot.pause(0.1)
+            assert app.screen is prompt
+            assert prompt.running
+            assert prompt.has_class("auto-setup-running")
+            status = str(prompt.query_one("#auto-setup-live-status").renderable)
+            package_status = str(prompt.query_one("#auto-setup-prompt-items").renderable)
+            assert packages[0].name in status
+            assert "37%" in status
+            assert "downloading · 37%" in package_status
             operation = str(app.screen_stack[0].query_one("#operation").renderable)
             assert packages[0].name in operation
             assert "37%" in operation
@@ -870,7 +880,20 @@ def test_responsive_layout_keeps_catalog_usable(monkeypatch, tmp_path) -> None:
             prompt = narrow.screen.query_one(".auto-setup-prompt-modal")
             assert prompt.region.height <= 24
             assert prompt.region.width <= 80
-            await pilot.press("escape")
+            narrow.screen.start_progress()
+            await pilot.pause()
+            assert narrow.screen.query_one("#auto-setup-live-status").display
+            assert prompt.region.height <= 24
+            assert prompt.region.width <= 80
+            narrow.screen.dismiss(None)
+            await pilot.pause()
+            narrow.push_screen(app_module.AutoSetupProgressModal())
+            await pilot.pause()
+            progress_modal = narrow.screen.query_one(".auto-setup-progress-modal")
+            assert progress_modal.region.height <= 24
+            assert progress_modal.region.width <= 80
+            narrow.pop_screen()
+            await pilot.pause()
             narrow.push_screen(app_module.PackageActionModal(_packages()[0], True))
             await pilot.pause()
             action = narrow.screen.query_one(".action-modal")

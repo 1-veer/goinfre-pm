@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 import threading
 import time
@@ -251,9 +251,12 @@ class AutoSetupPromptModal(ModalScreen[bool]):
 
     BINDINGS = [Binding("escape", "cancel", "Not now", show=False)]
 
-    def __init__(self, packages: list[tuple[str, str]]) -> None:
+    def __init__(self, packages: list[tuple[str, str]], on_install: Callable[[], None] | None = None) -> None:
         super().__init__()
         self.packages = packages
+        self.on_install = on_install
+        self.running = False
+        self.package_status = {name: reason for name, reason in packages}
 
     def compose(self) -> ComposeResult:
         count = len(self.packages)
@@ -267,16 +270,49 @@ class AutoSetupPromptModal(ModalScreen[bool]):
             )
             with VerticalScroll(id="auto-setup-prompt-list"):
                 yield Static(
-                    "\n".join(f"• {name} — {reason}" for name, reason in self.packages),
+                    self._package_lines(),
                     id="auto-setup-prompt-items",
                 )
             yield Static(
                 "Install or repair them now? Choose Not now to continue without changing anything.",
                 classes="modal-copy",
             )
+            yield Static("Preparing your Auto Setup…", id="auto-setup-live-status")
+            yield ProgressBar(total=100, show_eta=False, id="auto-setup-live-progress")
+            yield Static(
+                "Keep this window open. Missing apps are handled one at a time.",
+                id="auto-setup-live-note",
+            )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Install now", variant="primary", id="install")
                 yield Button("Not now", id="cancel")
+
+    def _package_lines(self) -> str:
+        return "\n".join(f"• {name} — {self.package_status[name]}" for name, _reason in self.packages)
+
+    def start_progress(self) -> None:
+        self.running = True
+        self.add_class("auto-setup-running")
+        self.query_one(".modal-title", Label).update("Setting up this post")
+        copies = list(self.query(".modal-copy"))
+        if copies:
+            copies[0].update("Your Auto Setup is being installed in this window.")
+        if len(copies) > 1:
+            copies[1].display = False
+        for name in self.package_status:
+            self.package_status[name] = "waiting"
+        self.query_one("#auto-setup-prompt-items", Static).update(self._package_lines())
+        install = self.query_one("#install", Button)
+        install.label = "Installing…"
+        install.disabled = True
+        cancel = self.query_one("#cancel", Button)
+        cancel.label = "Cancel safely"
+        cancel.focus()
+
+    def set_package_status(self, name: str, status: str) -> None:
+        if name in self.package_status:
+            self.package_status[name] = status
+            self.query_one("#auto-setup-prompt-items", Static).update(self._package_lines())
 
     def on_mount(self) -> None:
         self.query_one("#install", Button).focus()
@@ -288,10 +324,71 @@ class AutoSetupPromptModal(ModalScreen[bool]):
         buttons[(index + delta) % len(buttons)].focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "install")
+        if event.button.id == "install":
+            if self.on_install is None:
+                self.dismiss(True)
+                return
+            self.start_progress()
+            self.on_install()
+        elif self.running:
+            self._request_cancel()
+        else:
+            self.dismiss(False)
+
+    def _request_cancel(self) -> None:
+        button = self.query_one("#cancel", Button)
+        if button.disabled:
+            return
+        button.disabled = True
+        button.label = "Cancelling…"
+        self.query_one("#auto-setup-live-status", Static).update(
+            "Cancelling after the current safe step…"
+        )
+        self.app.action_cancel_operation()
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        if self.running:
+            self._request_cancel()
+        else:
+            self.dismiss(False)
+
+
+class AutoSetupProgressModal(ModalScreen[None]):
+    """Keep Auto Setup progress visible until every requested app is resolved."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal auto-setup-progress-modal"):
+            yield Label("Setting up this post", classes="modal-title")
+            yield Static(
+                "Keep this window open. GoinfrePM will install missing apps one at a time.",
+                classes="modal-copy",
+            )
+            yield Static("Preparing your Auto Setup…", id="auto-setup-live-status")
+            yield ProgressBar(total=100, show_eta=False, id="auto-setup-live-progress")
+            yield Static(
+                "If an earlier background task exists, this window waits safely and then continues automatically.",
+                id="auto-setup-live-note",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Cancel safely", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#cancel", Button).focus()
+
+    def on_button_pressed(self, _event: Button.Pressed) -> None:
+        self.action_cancel()
+
+    def action_cancel(self) -> None:
+        button = self.query_one("#cancel", Button)
+        if not button.disabled:
+            button.disabled = True
+            button.label = "Cancelling…"
+            self.query_one("#auto-setup-live-status", Static).update(
+                "Cancelling after the current safe step…"
+            )
+            self.app.action_cancel_operation()
 
 
 class AutoSetupBusyModal(ModalScreen[bool]):
@@ -644,7 +741,7 @@ class GoinfrePMApp(App[None]):
         Binding("enter", "primary", "Open", show=False),
     ]
 
-    def __init__(self, auto_restore: bool = True) -> None:
+    def __init__(self, auto_restore: bool = True, retired_autostart: bool = False) -> None:
         super().__init__()
         root = resolve_install_root()
         if root is None:
@@ -656,6 +753,7 @@ class GoinfrePMApp(App[None]):
         self.ui_theme = str(self.state.read().get("theme", DEFAULT_UI_THEME))
         self.manager = PackageManager(self.layout, self.packages, self.state)
         self.auto_restore = auto_restore
+        self.retired_autostart = retired_autostart
         self.visible_packages = list(self.packages)
         self.busy = False
         self.cancel_event = threading.Event()
@@ -755,6 +853,11 @@ class GoinfrePMApp(App[None]):
         self.query_one(RichLog).write(
             "[dim]Recommended: press x before leaving this shared post to reclaim GoinfrePM storage.[/dim]"
         )
+        if self.retired_autostart:
+            self.query_one(RichLog).write(
+                "[yellow]Disabled the old login background restore. Auto Setup now runs only in this visible window.[/yellow]"
+            )
+            self.notify("Old background Auto Setup disabled to prevent install conflicts")
         if not self.state.read().get("onboarding_complete", False):
             self.push_screen(WelcomeModal(self.layout.root), self._onboarding_closed)
         else:
@@ -787,25 +890,35 @@ class GoinfrePMApp(App[None]):
             )
             for package in pending
         ]
-        self.push_screen(
-            AutoSetupPromptModal(prompt_items),
-            lambda accepted: self._auto_setup_choice(pending, accepted),
+        prompt = AutoSetupPromptModal(
+            prompt_items,
+            on_install=lambda: self._start_auto_setup(pending),
         )
+        self.push_screen(prompt, self._auto_setup_prompt_closed)
 
-    def _auto_setup_choice(self, pending: list[Package], accepted: bool) -> None:
-        if not accepted:
+    def _auto_setup_prompt_closed(self, accepted: bool | None) -> None:
+        if accepted is False:
             self.query_one("#operation", Static).update("Auto Setup skipped for this launch")
             self.query_one(RichLog).write("Auto Setup was not installed; no application files were changed.")
-            return
+
+    def _start_auto_setup(self, pending: list[Package]) -> None:
         self.busy = True
         self.cancel_event = threading.Event()
-        self._restore_worker(pending)
+        self.call_after_refresh(self._restore_worker, pending)
 
     def _show_auto_setup_retry(self, packages: list[Package]) -> None:
-        self.push_screen(
-            AutoSetupBusyModal(),
-            lambda accepted: self._retry_auto_setup(packages, accepted),
-        )
+        def show_retry() -> None:
+            self.push_screen(
+                AutoSetupBusyModal(),
+                lambda accepted: self._retry_auto_setup(packages, accepted),
+            )
+
+        modal = self._auto_setup_modal()
+        if modal is not None:
+            modal.dismiss(None)
+            self.call_after_refresh(show_retry)
+        else:
+            show_retry()
 
     def _retry_auto_setup(self, packages: list[Package], accepted: bool) -> None:
         if not accepted:
@@ -817,8 +930,8 @@ class GoinfrePMApp(App[None]):
             return
         self.busy = True
         self.cancel_event = threading.Event()
-        self.query_one("#operation", Static).update("Preparing your Auto Setup…")
-        self._restore_worker(packages)
+        self.push_screen(AutoSetupProgressModal())
+        self.call_after_refresh(self._restore_worker, packages)
 
     def _main_screen(self) -> Screen | None:
         """Return the underlying package screen even while a modal is active."""
@@ -826,6 +939,88 @@ class GoinfrePMApp(App[None]):
             if list(screen.query("#package-table")):
                 return screen
         return None
+
+    def _auto_setup_modal(self) -> AutoSetupPromptModal | AutoSetupProgressModal | None:
+        for screen in reversed(self.screen_stack):
+            if isinstance(screen, AutoSetupProgressModal):
+                return screen
+            if isinstance(screen, AutoSetupPromptModal) and screen.running:
+                return screen
+        return None
+
+    def _show_auto_setup_package_status(self, package: Package | None, status: str) -> None:
+        if package is None:
+            return
+        modal = self._auto_setup_modal()
+        if isinstance(modal, AutoSetupPromptModal):
+            modal.set_package_status(package.name, status)
+
+    def _show_auto_setup_status(self, message: str, progress: float | None = None) -> None:
+        main_screen = self._main_screen()
+        operation_nodes = list(main_screen.query("#operation")) if main_screen is not None else []
+        if operation_nodes:
+            operation_nodes[0].update(message)
+        modal = self._auto_setup_modal()
+        if modal is not None:
+            statuses = list(modal.query("#auto-setup-live-status"))
+            bars = list(modal.query("#auto-setup-live-progress"))
+            if statuses:
+                statuses[0].update(message)
+            if progress is not None and bars:
+                bars[0].update(progress=max(0.0, min(100.0, progress)))
+        if progress is not None and main_screen is not None:
+            main_bars = list(main_screen.query("#progress"))
+            if main_bars:
+                main_bars[0].update(progress=max(0.0, min(100.0, progress)))
+
+    def _show_auto_setup_progress(self, progress: float) -> None:
+        value = max(0.0, min(100.0, progress))
+        main_screen = self._main_screen()
+        main_bars = list(main_screen.query("#progress")) if main_screen is not None else []
+        if main_bars:
+            main_bars[0].update(progress=value)
+        modal = self._auto_setup_modal()
+        if modal is not None:
+            bars = list(modal.query("#auto-setup-live-progress"))
+            if bars:
+                bars[0].update(progress=value)
+
+    def _show_auto_setup_install_progress(self, package: Package | None, progress: float) -> None:
+        if package is None:
+            self._show_auto_setup_progress(progress)
+            return
+        phase = "Downloading" if progress <= 40 else "Extracting" if progress <= 75 else "Finishing"
+        self._show_auto_setup_package_status(package, f"{phase.lower()} · {progress:.0f}%")
+        self._show_auto_setup_status(f"{phase}: {package.name} · {progress:.0f}%", progress)
+
+    def _write_main_log(self, message: str) -> None:
+        main_screen = self._main_screen()
+        logs = list(main_screen.query("#logs")) if main_screen is not None else []
+        if logs:
+            logs[0].write(message)
+
+    def _finish_auto_setup(
+        self,
+        succeeded: list[Package],
+        failed: list[tuple[Package, str]],
+        elapsed: float,
+        skipped: list[tuple[Package, str]],
+        ready: list[Package],
+    ) -> None:
+        modal = self._auto_setup_modal()
+        if modal is not None:
+            modal.dismiss(None)
+            self.call_after_refresh(
+                self._show_summary,
+                succeeded,
+                failed,
+                "restore",
+                elapsed,
+                skipped,
+                ready,
+            )
+        else:
+            self._show_summary(succeeded, failed, "restore", elapsed, skipped, ready)
 
     def on_resize(self, event: Resize) -> None:
         """Keep the package table usable on narrow campus terminals."""
@@ -1577,7 +1772,7 @@ class GoinfrePMApp(App[None]):
                 self.cancel_event,
                 list(by_identifier),
                 progress_callback=lambda value: self.call_from_thread(
-                    self.query_one(ProgressBar).update, progress=value
+                    self._show_auto_setup_install_progress, current[0], value
                 ),
                 transfer_callback=lambda done, total, speed, eta: self.call_from_thread(
                     self._show_transfer, current[0], done, total, speed, eta
@@ -1585,36 +1780,35 @@ class GoinfrePMApp(App[None]):
             )
             for kind, value in events:
                 if kind == "waiting":
-                    self.call_from_thread(self.query_one("#operation", Static).update, str(value))
-                    self.call_from_thread(self.query_one(RichLog).write, str(value))
+                    self.call_from_thread(self._show_auto_setup_status, str(value), 0)
+                    self.call_from_thread(self._write_main_log, str(value))
                 elif kind == "wait_progress":
-                    self.call_from_thread(self.query_one("#operation", Static).update, str(value))
+                    self.call_from_thread(self._show_auto_setup_status, str(value), 0)
                 elif kind == "peer_progress":
                     status = value if isinstance(value, dict) else {}
                     identifier = str(status.get("package", ""))
                     package = by_identifier.get(identifier)
                     if package is not None:
-                        changed_package = current[0] != package
                         current[0] = package
                         self.runtime_status[package.identifier] = "restoring"
-                        if changed_package:
-                            self.call_from_thread(self._refresh, preserve_identifier=package.identifier)
                     try:
                         progress = float(status.get("progress", 0))
                     except (TypeError, ValueError):
                         progress = 0
-                    self.call_from_thread(
-                        self.query_one(ProgressBar).update,
-                        progress=max(0.0, min(100.0, progress)),
-                    )
                     name = str(status.get("package_name", "")) or "Auto Setup"
                     phase = str(status.get("phase", "preparing")).replace("_", " ").title()
                     index = status.get("index")
                     total = status.get("total")
                     position = f" {index}/{total}" if index and total else ""
                     self.call_from_thread(
-                        self.query_one("#operation", Static).update,
+                        self._show_auto_setup_status,
                         f"{phase}{position}: {name} · {progress:.0f}%",
+                        progress,
+                    )
+                    self.call_from_thread(
+                        self._show_auto_setup_package_status,
+                        package,
+                        f"{phase.lower()} · {progress:.0f}%",
                     )
                 elif kind == "package":
                     identifier, index, total = value  # type: ignore[misc]
@@ -1623,25 +1817,39 @@ class GoinfrePMApp(App[None]):
                         current[0] = package
                         self.runtime_status[package.identifier] = "restoring"
                         self.call_from_thread(
-                            self.query_one("#operation", Static).update,
+                            self._show_auto_setup_status,
                             f"Restoring Auto Setup — package {index} of {total}: {package.name}",
+                            0,
                         )
-                        self.call_from_thread(self.query_one(ProgressBar).update, progress=0)
-                        self.call_from_thread(self._refresh, preserve_identifier=package.identifier)
+                        self.call_from_thread(
+                            self._show_auto_setup_package_status,
+                            package,
+                            "installing",
+                        )
                 elif kind == "log":
-                    self.call_from_thread(self.query_one(RichLog).write, str(value))
+                    self.call_from_thread(self._write_main_log, str(value))
                 elif kind == "progress":
-                    self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
+                    self.call_from_thread(self._show_auto_setup_install_progress, current[0], float(value))
                 elif kind == "restored":
                     package = by_identifier.get(str(value))
                     if package:
                         self.runtime_status.pop(package.identifier, None)
                         succeeded.append(package)
+                        self.call_from_thread(
+                            self._show_auto_setup_package_status,
+                            package,
+                            "ready",
+                        )
                 elif kind == "ready":
                     package = by_identifier.get(str(value))
                     if package:
                         self.runtime_status.pop(package.identifier, None)
                         ready.append(package)
+                        self.call_from_thread(
+                            self._show_auto_setup_package_status,
+                            package,
+                            "ready",
+                        )
                 elif kind in {"failed", "skipped"}:
                     identifier, reason = value  # type: ignore[misc]
                     package = by_identifier.get(str(identifier))
@@ -1650,21 +1858,36 @@ class GoinfrePMApp(App[None]):
                             self.runtime_status[package.identifier] = "failed"
                             failed.append((package, str(reason)))
                             self.call_from_thread(
-                                self.query_one(RichLog).write,
+                                self._write_main_log,
                                 f"[red]{package.name}: {reason}[/red]",
+                            )
+                            self.call_from_thread(
+                                self._show_auto_setup_package_status,
+                                package,
+                                f"failed · {str(reason)[:60]}",
                             )
                         else:
                             self.runtime_status.pop(package.identifier, None)
                             skipped.append((package, str(reason)))
+                            self.call_from_thread(
+                                self._show_auto_setup_package_status,
+                                package,
+                                f"skipped · {str(reason)[:60]}",
+                            )
                 elif kind == "cancelled":
                     package = by_identifier.get(str(value))
                     if package:
                         self.runtime_status.pop(package.identifier, None)
                         skipped.append((package, "cancelled"))
+                        self.call_from_thread(
+                            self._show_auto_setup_package_status,
+                            package,
+                            "cancelled",
+                        )
         except OperationBusyError:
             retry_needed = True
             self.call_from_thread(
-                self.query_one(RichLog).write,
+                self._write_main_log,
                 "Auto Setup is still preparing. Choose Retry when the current task finishes.",
             )
         except Exception as exc:
@@ -1673,20 +1896,18 @@ class GoinfrePMApp(App[None]):
                 if package not in succeeded and not any(item == package for item, _reason in failed):
                     self.runtime_status[package.identifier] = "failed"
                     failed.append((package, message))
-            self.call_from_thread(self.query_one(RichLog).write, f"[red]Auto Setup restore: {message}[/red]")
+            self.call_from_thread(self._write_main_log, f"[red]Auto Setup restore: {message}[/red]")
         finally:
             self.busy = False
-            self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
-            self.call_from_thread(self._refresh)
+            self.call_from_thread(self._show_auto_setup_status, "Ready", 100)
             elapsed = time.monotonic() - started
             if retry_needed:
                 self.call_from_thread(self._show_auto_setup_retry, packages)
             else:
                 self.call_from_thread(
-                    self._show_summary,
+                    self._finish_auto_setup,
                     succeeded,
                     failed,
-                    "restore",
                     elapsed,
                     skipped,
                     ready,
@@ -1696,8 +1917,12 @@ class GoinfrePMApp(App[None]):
         amount = human_size(done)
         total_text = human_size(total) if total is not None else "unknown"
         eta_text = f" · ETA {max(0, round(eta))}s" if eta is not None else ""
-        self.query_one("#operation", Static).update(
-            f"Downloading {package.name} · {amount}/{total_text} · {human_size(int(speed))}/s{eta_text}"
+        progress = done / total * 40.0 if total else None
+        percent = f" · {done / total * 100:.0f}%" if total else ""
+        self._show_auto_setup_package_status(package, f"downloading{percent}")
+        self._show_auto_setup_status(
+            f"Downloading {package.name} · {amount}/{total_text} · {human_size(int(speed))}/s{eta_text}",
+            progress,
         )
 
     def _show_summary(
@@ -1772,5 +1997,5 @@ class GoinfrePMApp(App[None]):
         self.panic(f"{DISPLAY_NAME} encountered an unexpected error: {error_text(error)}.{suffix}")
 
 
-def run_tui(auto_restore: bool = True) -> None:
-    GoinfrePMApp(auto_restore=auto_restore).run()
+def run_tui(auto_restore: bool = True, retired_autostart: bool = False) -> None:
+    GoinfrePMApp(auto_restore=auto_restore, retired_autostart=retired_autostart).run()

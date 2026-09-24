@@ -338,8 +338,8 @@ def test_restore_times_out_cleanly_when_real_operation_stays_active(tmp_path: Pa
         events = manager.restore(wait_timeout=0)
         assert next(events) == (
             "waiting",
-            "Auto Setup is already running elsewhere. Keep this window open; "
-            "no second terminal is needed.",
+            "An earlier GoinfrePM task is finishing on this post. Keep this "
+            "window open; it will continue with anything still missing.",
         )
         with pytest.raises(OperationBusyError, match="still finishing another task"):
             next(events)
@@ -356,7 +356,25 @@ def test_restore_reports_wait_time_when_owner_has_no_progress(tmp_path: Path) ->
         assert next(events)[0] == "waiting"
         kind, message = next(events)
         assert kind == "wait_progress"
-        assert "waiting 1s" in str(message)
+        assert "1s" in str(message)
+        assert "continue automatically" in str(message)
+
+
+def test_default_restore_wait_does_not_expire_after_thirty_seconds(monkeypatch, tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+
+    with OperationLock(manager.layout):
+        events = manager.restore()
+        assert next(events)[0] == "waiting"
+        monkeypatch.setattr(installer_module.time, "monotonic", lambda: 10**12)
+        monkeypatch.setattr(installer_module.time, "sleep", lambda _seconds: None)
+        kind, message = next(events)
+        assert kind == "wait_progress"
+        assert "continue automatically" in str(message)
+        events.close()
 
 
 def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatch, tmp_path: Path) -> None:
@@ -402,6 +420,47 @@ def test_restore_waits_for_other_session_then_rechecks_installed_apps(monkeypatc
     assert ("ready", "tool") in events
     assert not any(kind == "skipped" for kind, _value in events)
     assert not (manager.layout.runtime / "operation-status.json").exists()
+
+
+def test_restore_waits_for_earlier_apps_then_installs_last_missing_app(monkeypatch, tmp_path: Path) -> None:
+    items = [package(identifier) for identifier in ("qbittorrent", "visual-studio-code", "zen-browser")]
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_packages([item.identifier for item in items], True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), items, preferences)
+    installed = {"qbittorrent", "visual-studio-code"}
+    monkeypatch.setattr(
+        manager,
+        "installation",
+        lambda identifier: InstallationCheck("installed" if identifier in installed else "missing"),
+    )
+
+    def install(identifier, *_args, **_kwargs):
+        installed.add(identifier)
+        yield ("log", f"installed {identifier}")
+
+    monkeypatch.setattr(manager, "_install", install)
+    events: list[tuple[str, object]] = []
+    waiting = threading.Event()
+
+    def restore() -> None:
+        for event in manager.restore():
+            events.append(event)
+            if event[0] == "waiting":
+                waiting.set()
+
+    with OperationLock(manager.layout):
+        thread = threading.Thread(target=restore)
+        thread.start()
+        assert waiting.wait(2)
+        assert thread.is_alive()
+    thread.join(3)
+
+    assert not thread.is_alive()
+    assert installed == {"qbittorrent", "visual-studio-code", "zen-browser"}
+    assert ("ready", "qbittorrent") in events
+    assert ("ready", "visual-studio-code") in events
+    assert ("restored", "zen-browser") in events
+    assert not any(kind == "failed" for kind, _value in events)
 
 
 def test_restore_can_cancel_while_waiting_for_other_session(tmp_path: Path) -> None:
@@ -458,6 +517,23 @@ def test_operation_lock_discards_reused_pid_on_same_post(monkeypatch, tmp_path: 
         encoding="utf-8",
     )
     monkeypatch.setattr(installer_module, "_linux_process_start", lambda _pid: "new-start")
+
+    with OperationLock(layout):
+        assert lock_file.exists()
+    assert not lock_file.exists()
+
+
+def test_legacy_lock_discards_pid_reused_by_unrelated_process(monkeypatch, tmp_path: Path) -> None:
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    layout.create()
+    lock_file = layout.runtime / "operation.lock"
+    lock_file.write_text(
+        '{"pid": %d, "token": "old", "created_at": %f, '
+        '"hostname": "%s", "boot_id": "%s"}'
+        % (os.getpid(), time.time(), socket.gethostname(), installer_module._current_boot_id()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(installer_module, "_linux_process_command", lambda _pid: "/usr/bin/sleep 300")
 
     with OperationLock(layout):
         assert lock_file.exists()

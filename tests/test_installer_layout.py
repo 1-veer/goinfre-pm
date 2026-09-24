@@ -26,6 +26,13 @@ def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
     assert "sudo apt" not in installer
 
 
+def test_installer_removes_only_the_retired_manager_autostart_entry() -> None:
+    installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
+
+    assert 'LEGACY_AUTOSTART=$HOME/.config/autostart/$PROJECT_SLUG-restore.desktop' in installer
+    assert 'rm -f "$LEGACY_AUTOSTART"' in installer
+
+
 def test_manager_update_preserves_root_local_installation_manifest() -> None:
     installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
 
