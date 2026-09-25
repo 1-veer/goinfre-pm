@@ -13,6 +13,7 @@ def test_error_text_handles_empty_exception() -> None:
 
 def test_crash_log_contains_diagnostic(tmp_path: Path) -> None:
     log = tmp_path / "crash.log"
+    log.touch(mode=0o644)
 
     try:
         raise LookupError("fixture failure")
@@ -21,6 +22,17 @@ def test_crash_log_contains_diagnostic(tmp_path: Path) -> None:
 
     content = log.read_text(encoding="utf-8")
     assert "LookupError: fixture failure" in content
+    assert log.stat().st_mode & 0o777 == 0o600
+
+
+def test_crash_log_refuses_symlink_target(tmp_path: Path) -> None:
+    private_file = tmp_path / "private"
+    private_file.write_text("unchanged", encoding="utf-8")
+    log = tmp_path / "crash.log"
+    log.symlink_to(private_file)
+
+    assert write_crash_log(RuntimeError("do not append"), log) is None
+    assert private_file.read_text(encoding="utf-8") == "unchanged"
 
 
 def test_cli_contains_unexpected_errors(monkeypatch, capsys, tmp_path: Path) -> None:

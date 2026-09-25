@@ -51,13 +51,21 @@ if [ -e "$LEGACY_AUTOSTART" ] || [ -L "$LEGACY_AUTOSTART" ]; then
 fi
 
 # Removing the local manager must still work if goinfre or a system extraction
-# tool is unavailable. Application data and state are deliberately retained.
-if [ "$RUN_ONCE" = "0" ] && [ "${1:-}" = "uninstall" ] && [ "${2:-}" != "--purge-data" ]; then
-    info "Removing the local package-manager runtime; application payloads and state are retained."
-    rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
-    rm -rf "$MANAGER_HOME"
-    ok "$PROJECT_DISPLAY_NAME runtime removed."
-    exit 0
+# tool is unavailable. Application data is purged only for the exact, explicit
+# two-argument form; a typo must never widen deletion scope.
+PURGE_MANAGER_DATA=0
+if [ "$RUN_ONCE" = "0" ] && [ "${1:-}" = "uninstall" ]; then
+    if [ "$#" -eq 1 ]; then
+        info "Removing the local package-manager runtime; application payloads and state are retained."
+        rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
+        rm -rf "$MANAGER_HOME"
+        ok "$PROJECT_DISPLAY_NAME runtime removed."
+        exit 0
+    elif [ "$#" -eq 2 ] && [ "$2" = "--purge-data" ]; then
+        PURGE_MANAGER_DATA=1
+    else
+        die "Usage: ./install.sh uninstall [--purge-data]"
+    fi
 fi
 
 prerequisite_help() {
@@ -218,7 +226,7 @@ if [ "$RUN_ONCE" = "1" ]; then
     [ ! -L "$MANAGER_VENV" ] || die "Refusing a symlinked goinfre Python environment: $MANAGER_VENV"
 fi
 
-if [ "$RUN_ONCE" = "0" ] && [ "${1:-}" = "uninstall" ]; then
+if [ "$PURGE_MANAGER_DATA" = "1" ]; then
     info "Removing the manager and explicitly purging goinfre application data."
     rm -f "$HOME/.local/bin/$PROJECT_COMMAND"
     rm -rf "$MANAGER_HOME"

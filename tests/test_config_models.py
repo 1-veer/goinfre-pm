@@ -44,6 +44,8 @@ def test_curated_catalog_includes_verified_developer_tools() -> None:
     assert packages["kitty"].executable_candidates == ("bin/kitty",)
     assert packages["kitty"].asset_pattern == r"^kitty-.*-x86_64\.txz$"
     assert packages["postman"].executable_candidates[0] == "app/Postman"
+    assert packages["blender"].url.startswith("https://download.blender.org/release/")
+    assert "mirror" not in packages["blender"].notes.lower()
 
 
 def test_spotify_catalog_entry_is_pinned_to_verified_vendor_build() -> None:

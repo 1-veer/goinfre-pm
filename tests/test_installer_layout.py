@@ -163,3 +163,33 @@ def test_run_mode_never_interprets_forwarded_uninstall_as_manager_removal(tmp_pa
     assert result.returncode == 0, result.stderr
     assert old_launcher.read_text(encoding="utf-8") == "keep"
     assert old_runtime.read_text(encoding="utf-8") == "keep"
+
+
+def test_uninstall_typo_never_purges_manager_or_application_data(tmp_path: Path) -> None:
+    project = Path(__file__).parents[1]
+    home = tmp_path / "home"
+    launcher = home / ".local" / "bin" / "gpm"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("keep", encoding="utf-8")
+    runtime = home / ".local" / "share" / "goinfre-pm" / "keep"
+    runtime.parent.mkdir(parents=True)
+    runtime.write_text("keep", encoding="utf-8")
+    root = tmp_path / "goinfre-pm"
+    payload = root / "apps" / "tool" / "keep"
+    payload.parent.mkdir(parents=True)
+    payload.write_text("keep", encoding="utf-8")
+    env = {**os.environ, "HOME": str(home), "GPM_INSTALL_ROOT": str(root)}
+
+    result = subprocess.run(
+        ["sh", str(project / "install.sh"), "uninstall", "--purge-dtaa"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "Usage:" in result.stderr
+    assert launcher.read_text(encoding="utf-8") == "keep"
+    assert runtime.read_text(encoding="utf-8") == "keep"
+    assert payload.read_text(encoding="utf-8") == "keep"

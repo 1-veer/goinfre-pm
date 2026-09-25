@@ -39,11 +39,11 @@ id = "tor-browser"
 name = "Tor Browser"
 description = "Privacy browser distributed by the Tor Project."
 category = "Browsers"
-url = "https://dist.torproject.org/torbrowser/15.0.22/tor-browser-linux-x86_64-15.0.22.tar.xz"
+url = "https://dist.torproject.org/torbrowser/15.0.23/tor-browser-linux-x86_64-15.0.23.tar.xz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["Browser/start-tor-browser", "Browser/firefox.real"]
-version = "15.0.22"
+version = "15.0.23"
 notes = "Pinned official distribution URL; update the catalog when Tor retires this release."
 
 [[package]]
@@ -505,12 +505,12 @@ id = "blender"
 name = "Blender"
 description = "Open-source 3D creation suite."
 category = "Media"
-url = "https://ftp.nluug.nl/pub/graphics/blender/release/Blender4.3/blender-4.3.2-linux-x64.tar.xz"
+url = "https://download.blender.org/release/Blender4.3/blender-4.3.2-linux-x64.tar.xz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["blender", "blender-launcher"]
 version = "4.3.2"
-notes = "Third-party mirror and pinned release; review before production use."
+notes = "Pinned official distribution URL; review the release version before broad deployment."
 
 [[package]]
 id = "imagemagick"
