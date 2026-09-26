@@ -49,11 +49,11 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .auto-setup-prompt-modal #auto-setup-live-status { display: none; }
 .auto-setup-prompt-modal #auto-setup-live-progress { display: none; }
 .auto-setup-prompt-modal #auto-setup-live-note { display: none; }
-.auto-setup-running .auto-setup-prompt-modal #auto-setup-live-status { display: block; height: auto; min-height: 3; color: $gpm-text; padding: 1; background: $gpm-panel; }
+.auto-setup-running .auto-setup-prompt-modal #auto-setup-live-status { display: block; height: 3; color: $gpm-text; padding: 1; background: $gpm-panel; }
 .auto-setup-running .auto-setup-prompt-modal #auto-setup-live-progress { display: block; height: 1; margin: 1 0; color: $gpm-violet; }
 .auto-setup-running .auto-setup-prompt-modal #auto-setup-live-note { display: block; height: auto; color: $gpm-muted; margin-bottom: 1; }
 .auto-setup-running #auto-setup-prompt-list { max-height: 7; }
-.auto-setup-progress-modal #auto-setup-live-status { height: auto; min-height: 3; color: $gpm-text; padding: 1; background: $gpm-panel; }
+.auto-setup-progress-modal #auto-setup-live-status { height: 3; color: $gpm-text; padding: 1; background: $gpm-panel; }
 .auto-setup-progress-modal #auto-setup-live-progress { height: 1; margin: 1 0; color: $gpm-violet; }
 .auto-setup-progress-modal #auto-setup-live-note { height: auto; color: $gpm-muted; margin-bottom: 1; }
 .quit-post-modal { width: 76; max-height: 90%; }

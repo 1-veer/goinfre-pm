@@ -436,6 +436,42 @@ def test_cancel_key_and_my_setup_removal_choice_are_keyboard_safe(monkeypatch, t
     asyncio.run(scenario())
 
 
+def test_auto_setup_cancel_from_modal_finishes_without_missing_main_nodes(monkeypatch, tmp_path) -> None:
+    packages = _packages()[:1]
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    state.set_setup_package(packages[0].identifier, True)
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    def cancellable_restore(cancel, identifiers, **_callbacks):
+        identifier = identifiers[0]
+        yield ("package", (identifier, 1, 1))
+        assert cancel.wait(2)
+        yield ("cancelled", identifier)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=True)
+        app.manager.restore = cancellable_restore  # type: ignore[method-assign]
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.4)
+            assert isinstance(app.screen, app_module.AutoSetupPromptModal)
+            await pilot.press("enter")
+            await pilot.pause(0.1)
+            assert app.screen.query_one("#cancel", Button).has_focus
+            await pilot.press("enter")
+            await pilot.pause(0.6)
+            assert app.cancel_event.is_set()
+            assert not app.busy
+            assert app.is_running
+            assert isinstance(app.screen, app_module.SummaryModal)
+            assert "Skipped: 1" in app.screen.summary
+            assert "cancelled" in app.screen.summary
+
+    asyncio.run(scenario())
+
+
 def test_failed_restore_is_visible_for_the_current_session(monkeypatch, tmp_path) -> None:
     packages = _packages()[:1]
     state = StateStore(tmp_path / "state.json")
@@ -836,6 +872,23 @@ def test_progress_and_completion_summary(monkeypatch, tmp_path) -> None:
             operation = str(app.query_one("#operation").renderable)
             assert "1.0 KiB/4.0 KiB" in operation
             assert "ETA 6s" in operation
+
+            prompt = app_module.AutoSetupPromptModal([(package.name, "not installed")])
+            app.push_screen(prompt)
+            await pilot.pause()
+            prompt.start_progress()
+            await pilot.pause()
+            modal_height = prompt.query_one(".auto-setup-prompt-modal").region.height
+            for done in (1024, 2048, 3072):
+                app._show_transfer(package, done, 4096, 512, 6.0)
+            await pilot.pause()
+            live_status = str(prompt.query_one("#auto-setup-live-status").renderable)
+            assert "75%" in live_status
+            assert "512.0 B/s" in live_status
+            assert "3.0 KiB/4.0 KiB" not in live_status
+            assert prompt.query_one(".auto-setup-prompt-modal").region.height == modal_height
+            prompt.dismiss(None)
+            await pilot.pause()
 
             app._show_summary([package], [], "install", 1.2)
             assert isinstance(app.screen, app_module.SummaryModal)

@@ -26,6 +26,15 @@ def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
     assert "sudo apt" not in installer
 
 
+def test_first_launch_has_a_visible_activity_indicator() -> None:
+    installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
+
+    assert "activity_start()" in installer
+    assert "still working, please wait" in installer
+    assert "Starting the interface — please wait" in installer
+    assert '[ -t 1 ] || return 0' in installer
+
+
 def test_installer_removes_only_the_retired_manager_autostart_entry() -> None:
     installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
 

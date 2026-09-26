@@ -940,6 +940,13 @@ class GoinfrePMApp(App[None]):
                 return screen
         return None
 
+    def _update_main_operation(self, message: str) -> None:
+        """Update the task label without assuming the main screen is current."""
+        main_screen = self._main_screen()
+        operation_nodes = list(main_screen.query("#operation")) if main_screen is not None else []
+        if operation_nodes:
+            operation_nodes[0].update(message)
+
     def _auto_setup_modal(self) -> AutoSetupPromptModal | AutoSetupProgressModal | None:
         for screen in reversed(self.screen_stack):
             if isinstance(screen, AutoSetupProgressModal):
@@ -957,21 +964,20 @@ class GoinfrePMApp(App[None]):
 
     def _show_auto_setup_status(self, message: str, progress: float | None = None) -> None:
         main_screen = self._main_screen()
-        operation_nodes = list(main_screen.query("#operation")) if main_screen is not None else []
-        if operation_nodes:
-            operation_nodes[0].update(message)
-        modal = self._auto_setup_modal()
-        if modal is not None:
-            statuses = list(modal.query("#auto-setup-live-status"))
-            bars = list(modal.query("#auto-setup-live-progress"))
-            if statuses:
-                statuses[0].update(message)
-            if progress is not None and bars:
-                bars[0].update(progress=max(0.0, min(100.0, progress)))
-        if progress is not None and main_screen is not None:
-            main_bars = list(main_screen.query("#progress"))
-            if main_bars:
-                main_bars[0].update(progress=max(0.0, min(100.0, progress)))
+        with self.batch_update():
+            self._update_main_operation(message)
+            modal = self._auto_setup_modal()
+            if modal is not None:
+                statuses = list(modal.query("#auto-setup-live-status"))
+                bars = list(modal.query("#auto-setup-live-progress"))
+                if statuses:
+                    statuses[0].update(message)
+                if progress is not None and bars:
+                    bars[0].update(progress=max(0.0, min(100.0, progress)))
+            if progress is not None and main_screen is not None:
+                main_bars = list(main_screen.query("#progress"))
+                if main_bars:
+                    main_bars[0].update(progress=max(0.0, min(100.0, progress)))
 
     def _show_auto_setup_progress(self, progress: float) -> None:
         value = max(0.0, min(100.0, progress))
@@ -1366,7 +1372,7 @@ class GoinfrePMApp(App[None]):
             self.notify("No operation is active", severity="warning")
             return
         self.cancel_event.set()
-        self.query_one("#operation", Static).update("Cancelling after the current safe step…")
+        self._update_main_operation("Cancelling after the current safe step…")
         self.notify("Cancellation requested", severity="warning")
 
     def action_toggle(self) -> None:
@@ -1919,11 +1925,15 @@ class GoinfrePMApp(App[None]):
         eta_text = f" · ETA {max(0, round(eta))}s" if eta is not None else ""
         progress = done / total * 40.0 if total else None
         percent = f" · {done / total * 100:.0f}%" if total else ""
-        self._show_auto_setup_package_status(package, f"downloading{percent}")
-        self._show_auto_setup_status(
-            f"Downloading {package.name} · {amount}/{total_text} · {human_size(int(speed))}/s{eta_text}",
-            progress,
+        modal_active = self._auto_setup_modal() is not None
+        message = (
+            f"Downloading {package.name}{percent} · {human_size(int(speed))}/s"
+            if modal_active
+            else f"Downloading {package.name} · {amount}/{total_text} · {human_size(int(speed))}/s{eta_text}"
         )
+        with self.batch_update():
+            self._show_auto_setup_package_status(package, f"downloading{percent}")
+            self._show_auto_setup_status(message, progress)
 
     def _show_summary(
         self,

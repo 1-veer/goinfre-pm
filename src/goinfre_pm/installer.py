@@ -707,11 +707,11 @@ class PackageManager:
                     speed = done / elapsed
                     eta = (total - done) / speed if total is not None and speed > 0 else None
                     now = time.monotonic()
-                    if now - last_transfer_emit >= 0.2 or (total is not None and done == total):
+                    if now - last_transfer_emit >= 0.5 or (total is not None and done == total):
                         log(f"download {done}/{total or '?'} bytes")
                         if transfer_callback:
                             transfer_callback(done, total, speed, eta)
-                        if total and progress_callback:
+                        elif total and progress_callback:
                             progress_callback(min(40.0, done / total * 40.0))
                         last_transfer_emit = now
 

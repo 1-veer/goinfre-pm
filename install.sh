@@ -36,6 +36,36 @@ log_note() {
     fi
 }
 
+# Long first-launch steps keep their detailed output in bootstrap.log. Show a
+# small heartbeat on interactive terminals so a quiet pip/download step never
+# looks frozen. Captured/non-interactive output remains clean and deterministic.
+ACTIVITY_PID=
+activity_start() {
+    ACTIVITY_PID=
+    [ -t 1 ] || return 0
+    activity_label=$1
+    (
+        trap 'exit 0' HUP INT TERM
+        while :; do
+            for activity_frame in '|' '/' '-' '\\'; do
+                printf "\r%b[%s]%b %s %s" "$VIOLET" "$PROJECT_DISPLAY_NAME" "$RESET" "$activity_frame" "$activity_label"
+                sleep 1
+            done
+        done
+    ) &
+    ACTIVITY_PID=$!
+}
+activity_stop() {
+    if [ -n "${ACTIVITY_PID:-}" ]; then
+        kill "$ACTIVITY_PID" >/dev/null 2>&1 || true
+        wait "$ACTIVITY_PID" 2>/dev/null || true
+        printf '\r\033[2K'
+        ACTIVITY_PID=
+    fi
+}
+trap 'activity_stop' EXIT
+trap 'activity_stop; exit 130' HUP INT TERM
+
 # Keep the comparatively small manager available when campus goinfre storage
 # changes. Downloaded/extracted applications remain in the selected goinfre root.
 MANAGER_HOME=$HOME/.local/share/$PROJECT_SLUG
@@ -107,7 +137,8 @@ download_pip_wheel() {
     fi
     rm -f "$PIP_BOOTSTRAP_WHEEL"
     log_note "Downloading and verifying the private pip bootstrap"
-    if ! python3 - "$PIP_BOOTSTRAP_URL" "$PIP_BOOTSTRAP_WHEEL" "$PIP_BOOTSTRAP_SHA256" "$PROJECT_DISPLAY_NAME/$PROJECT_VERSION" >> "$BOOTSTRAP_LOG" 2>&1 <<'PY'
+    activity_start "Downloading verified Python tools — please wait"
+    if python3 - "$PIP_BOOTSTRAP_URL" "$PIP_BOOTSTRAP_WHEEL" "$PIP_BOOTSTRAP_SHA256" "$PROJECT_DISPLAY_NAME/$PROJECT_VERSION" >> "$BOOTSTRAP_LOG" 2>&1 <<'PY'
 import hashlib
 import os
 from pathlib import Path
@@ -143,6 +174,9 @@ except Exception:
     raise
 PY
     then
+        activity_stop
+    else
+        activity_stop
         die "Could not securely download the private pip bootstrap from PyPI. Check the network and retry."
     fi
     pip_wheel_is_valid || die "The private pip bootstrap download failed verification. Retry when PyPI is reachable."
@@ -158,9 +192,14 @@ ensure_private_pip() {
     SETUP_UPDATED=1
     log_note "Bootstrapping pip $PIP_BOOTSTRAP_VERSION inside the private environment"
     download_pip_wheel
-    PYTHONPATH=$PIP_BOOTSTRAP_WHEEL "$MANAGER_VENV/bin/python" -m pip install \
-        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" >> "$BOOTSTRAP_LOG" 2>&1 \
-        || die "Failed to bootstrap pip inside the private environment."
+    activity_start "Preparing private Python tools — still working"
+    if PYTHONPATH=$PIP_BOOTSTRAP_WHEEL "$MANAGER_VENV/bin/python" -m pip install \
+        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" >> "$BOOTSTRAP_LOG" 2>&1; then
+        activity_stop
+    else
+        activity_stop
+        die "Failed to bootstrap pip inside the private environment."
+    fi
 }
 
 writable_dir() {
@@ -264,8 +303,13 @@ if [ ! -x "$MANAGER_VENV/bin/python" ]; then
     info "Creating a private Python environment (first launch only)"
     SETUP_UPDATED=1
     log_note "Creating private Python environment: $MANAGER_VENV"
-    python3 -m venv --without-pip "$MANAGER_VENV" >> "$BOOTSTRAP_LOG" 2>&1 \
-        || die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
+    activity_start "Creating the private environment — still working"
+    if python3 -m venv --without-pip "$MANAGER_VENV" >> "$BOOTSTRAP_LOG" 2>&1; then
+        activity_stop
+    else
+        activity_stop
+        die "Failed to create the private Python environment. Ask staff to restore the standard Ubuntu Python."
+    fi
 fi
 ensure_private_pip
 
@@ -285,9 +329,14 @@ if [ "$RUN_ONCE" = "1" ]; then
         SETUP_UPDATED=1
         log_note "Installing pinned Python dependencies from requirements.txt"
         rm -f "$REQUIREMENTS_MARKER"
-        "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1 \
-            || die "Could not install Python dependencies in goinfre. Check the network and retry."
+        activity_start "Installing the interface — still working, please wait"
+        if "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
+            activity_stop
+        else
+            activity_stop
+            die "Could not install Python dependencies in goinfre. Check the network and retry."
+        fi
         printf '%s\n' "$REQUIREMENTS_HASH" > "$REQUIREMENTS_MARKER"
     else
         log_note "Pinned Python dependencies are already ready"
@@ -303,6 +352,7 @@ if [ "$RUN_ONCE" = "1" ]; then
     fi
     info "Full setup details: $BOOTSTRAP_LOG"
     printf "%b%s%b\n\n" "$BOLD$VIOLET" "$PROJECT_SIGNATURE" "$RESET"
+    info "Starting the interface — please wait"
     exec "$MANAGER_VENV/bin/python" -m "$PROJECT_MODULE" "$@"
 fi
 
