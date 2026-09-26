@@ -1,6 +1,6 @@
 {
   "name": "goinfre-pm",
-  "version": "1.5.13",
+  "version": "1.5.14",
   "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
   "license": "MIT",
   "author": "veer",
@@ -13,8 +13,7 @@
     "url": "https://github.com/1-veer/goinfre-pm/issues"
   },
   "bin": {
-    "goinfre-pm": "npm/bin/goinfre-pm.js",
-    "gpm": "npm/bin/goinfre-pm.js"
+    "goinfre-pm": "npm/bin/goinfre-pm.js"
   },
   "files": [
     "npm/",

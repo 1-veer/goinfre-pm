@@ -12,8 +12,7 @@ def test_npm_package_contains_complete_local_installer() -> None:
     metadata = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
 
     assert metadata["name"] == "goinfre-pm"
-    assert metadata["bin"]["goinfre-pm"] == "npm/bin/goinfre-pm.js"
-    assert metadata["bin"]["gpm"] == "npm/bin/goinfre-pm.js"
+    assert metadata["bin"] == {"goinfre-pm": "npm/bin/goinfre-pm.js"}
     for required in (
         "npm/",
         "src/goinfre_pm/*.py",
