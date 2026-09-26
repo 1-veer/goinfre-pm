@@ -702,19 +702,29 @@ class PackageManager:
             promoted = False
             download_started = time.monotonic()
             last_transfer_emit = 0.0
+            last_transfer_time = download_started
+            last_transfer_done = 0
+            smoothed_speed = 0.0
             try:
                 yield ("log", f"Downloading {package.name}")
 
                 def on_progress(done: int, total: int | None) -> None:
                     nonlocal download_started, last_transfer_emit
+                    nonlocal last_transfer_time, last_transfer_done, smoothed_speed
                     if done == 0:
                         download_started = time.monotonic()
                         last_transfer_emit = 0.0
+                        last_transfer_time = download_started
+                        last_transfer_done = 0
+                        smoothed_speed = 0.0
                         return
-                    elapsed = max(time.monotonic() - download_started, 0.001)
-                    speed = done / elapsed
-                    eta = (total - done) / speed if total is not None and speed > 0 else None
                     now = time.monotonic()
+                    elapsed = max(now - last_transfer_time, 0.001)
+                    delta = max(0, done - last_transfer_done)
+                    current_speed = delta / elapsed
+                    smoothed_speed = current_speed if smoothed_speed <= 0 else (smoothed_speed * 0.7 + current_speed * 0.3)
+                    speed = smoothed_speed
+                    eta = (total - done) / speed if total is not None and speed > 0 else None
                     if now - last_transfer_emit >= 0.5 or (total is not None and done == total):
                         log(f"download {done}/{total or '?'} bytes")
                         if transfer_callback:
@@ -722,6 +732,8 @@ class PackageManager:
                         elif total and progress_callback:
                             progress_callback(min(40.0, done / total * 40.0))
                         last_transfer_emit = now
+                    last_transfer_time = now
+                    last_transfer_done = done
 
                 archive, version = download(package, operation, on_progress, log, cancel)
                 if cancel is not None and cancel.is_set():

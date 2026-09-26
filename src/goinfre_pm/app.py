@@ -1366,6 +1366,9 @@ class GoinfrePMApp(App[None]):
 
     def on_package_table_double_clicked(self, event: PackageTable.DoubleClicked) -> None:
         if event.table.id == "package-table" and not isinstance(self.screen, ModalScreen):
+            package = self._current()
+            if package is not None and not self.busy and not self.manager.installed(package.identifier):
+                self.notify(f"Installing {package.name}…")
             self.action_install_one()
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:

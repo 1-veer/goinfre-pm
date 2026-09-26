@@ -163,9 +163,11 @@ def test_double_click_installs_the_clicked_package(monkeypatch, tmp_path) -> Non
     async def scenario() -> None:
         app = app_module.GoinfrePMApp(auto_restore=False)
         calls: list[tuple[list[Package], str]] = []
+        notices: list[str] = []
         app._run_packages = lambda items, operation, keep_setup=False: calls.append(  # type: ignore[method-assign]
             (list(items), operation)
         )
+        app.notify = lambda message, **_kwargs: notices.append(str(message))  # type: ignore[method-assign]
         async with app.run_test(size=(120, 36)) as pilot:
             await pilot.pause(0.3)
             assert await pilot.click("#package-table", offset=(5, 1))
@@ -174,6 +176,7 @@ def test_double_click_installs_the_clicked_package(monkeypatch, tmp_path) -> Non
             assert await pilot.click("#package-table", offset=(5, 1))
             await pilot.pause()
             assert calls == [([packages[0]], "install")]
+            assert notices[-1] == f"Installing {packages[0].name}…"
 
     asyncio.run(scenario())
 

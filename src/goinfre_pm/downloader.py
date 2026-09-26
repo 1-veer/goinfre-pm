@@ -25,11 +25,18 @@ class DownloadCancelled(RuntimeError):
     pass
 
 
-def _request(url: str, timeout: int = 30) -> urllib.response.addinfourl:
+def _request(
+    url: str,
+    timeout: int = 30,
+    extra_headers: dict[str, str] | None = None,
+) -> urllib.response.addinfourl:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme != "https" or not parsed.netloc:
         raise RuntimeError("Only remote HTTPS downloads are allowed")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream, application/json"})
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/octet-stream, application/json"}
+    if extra_headers:
+        headers.update(extra_headers)
+    request = urllib.request.Request(url, headers=headers)
     try:
         # The scheme is checked immediately above and again after redirects.
         response = urllib.request.urlopen(request, timeout=timeout, context=ssl.create_default_context())  # nosec B310
@@ -142,6 +149,7 @@ def download(
     url, version = (resolve_github_release(package, log) if package.source_type == "github" else (package.url, package.version))
     destination.mkdir(parents=True, exist_ok=True)
     output: Path | None = None
+    filename = "download.bin"
     written = 0
     total: int | None = None
     last_error: BaseException | None = None
@@ -152,17 +160,35 @@ def download(
         if cancel and cancel.is_set():
             raise DownloadCancelled("Download cancelled")
         try:
-            with _request(url, timeout=8) as response:
-                filename = _response_name(response, url)
-                output = destination / filename
-                output.unlink(missing_ok=True)
+            headers = {"Range": f"bytes={written}-"} if written else None
+            request_args = (url, 8, headers) if headers else (url, 8)
+            with _request(*request_args) as response:
+                response_name = _response_name(response, url)
+                if output is None:
+                    filename = response_name
+                    output = destination / filename
+                    output.unlink(missing_ok=True)
+                status = getattr(response, "status", None)
+                if status is None:
+                    getcode = getattr(response, "getcode", None)
+                    status = getcode() if callable(getcode) else 200
+                content_range = response.headers.get("Content-Range", "")
+                range_match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+|\*)", content_range)
+                resumed = bool(written and status == 206 and range_match and int(range_match.group(1)) == written)
+                if written and not resumed:
+                    log("Download server did not support resume; restarting this transfer")
+                    written = 0
+                if not resumed:
+                    output.unlink(missing_ok=True)
                 total_header = response.headers.get("Content-Length")
-                total = int(total_header) if total_header and total_header.isdigit() else None
-                written = 0
-                started = time.monotonic()
-                window_started = started
+                response_length = int(total_header) if total_header and total_header.isdigit() else None
+                if resumed and range_match and range_match.group(3).isdigit():
+                    total = int(range_match.group(3))
+                elif response_length is not None:
+                    total = written + response_length
+                window_started = time.monotonic()
                 window_bytes = 0
-                with output.open("xb") as handle:
+                with output.open("ab" if resumed else "xb") as handle:
                     while True:
                         if cancel and cancel.is_set():
                             raise DownloadCancelled("Download cancelled")
@@ -175,9 +201,9 @@ def download(
                         progress(written, total)
                         now = time.monotonic()
                         window_elapsed = now - window_started
-                        if attempt < 3 and window_elapsed >= 30 and window_bytes / window_elapsed < 32 * 1024:
-                            raise TimeoutError("download stayed below 32 KiB/s for 30 seconds")
-                        if window_elapsed >= 30:
+                        if attempt < 3 and window_elapsed >= 20 and window_bytes / window_elapsed < 128 * 1024:
+                            raise TimeoutError("download stayed below 128 KiB/s for 20 seconds")
+                        if window_elapsed >= 20:
                             window_started, window_bytes = now, 0
             if total is not None and written != total:
                 raise http.client.IncompleteRead(b"", total - written)
@@ -188,12 +214,14 @@ def download(
             raise
         except (OSError, RuntimeError, TimeoutError, http.client.HTTPException, socket.timeout) as exc:
             last_error = exc
-            if output is not None:
-                output.unlink(missing_ok=True)
             if attempt == 3:
+                if output is not None:
+                    output.unlink(missing_ok=True)
                 raise RuntimeError(f"Download failed after 3 attempts: {exc}") from exc
-            log(f"Download connection was too slow or interrupted; retrying ({attempt}/3)")
-            progress(0, total)
+            log(
+                "Download connection was too slow or interrupted; "
+                f"retrying the connection and resuming ({attempt}/3)"
+            )
             if cancel and cancel.wait(min(attempt, 2)):
                 raise DownloadCancelled("Download cancelled") from exc
     if output is None:

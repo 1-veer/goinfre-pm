@@ -1,8 +1,10 @@
 from io import BytesIO
 from pathlib import Path
 import os
+import sys
 import tarfile
 import threading
+import time
 import zipfile
 
 import pytest
@@ -86,14 +88,69 @@ def test_txz_is_dispatched_as_tar(tmp_path: Path) -> None:
 def test_deb_uses_ubuntu_dpkg_deb_extractor(monkeypatch, tmp_path: Path) -> None:
     archive = tmp_path / "tool.deb"
     destination = tmp_path / "out"
-    archive.touch()
+    archive.write_bytes(b"!<arch>\n")
     calls = []
     monkeypatch.setattr(extractor.shutil, "which", lambda command: "/usr/bin/dpkg-deb" if command == "dpkg-deb" else None)
-    monkeypatch.setattr(extractor.subprocess, "run", lambda args, **kwargs: calls.append((args, kwargs)))
+    class Process:
+        pid = 123
+        returncode = 0
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(extractor.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)) or Process())
 
     extractor.extract_deb(archive, destination)
 
-    assert calls == [(["/usr/bin/dpkg-deb", "-x", str(archive), str(destination)], {"check": True, "timeout": 180})]
+    assert calls[0][0] == ["/usr/bin/dpkg-deb", "-x", str(archive), str(destination)]
+    assert calls[0][1]["start_new_session"] is True
+
+
+def test_deb_rejects_non_debian_payload_before_running_extractor(monkeypatch, tmp_path: Path) -> None:
+    archive = tmp_path / "tool.deb"
+    archive.write_bytes(b"not a deb")
+    monkeypatch.setattr(extractor.shutil, "which", lambda _command: "/usr/bin/dpkg-deb")
+    monkeypatch.setattr(
+        extractor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("extractor was started")),
+    )
+
+    with pytest.raises(RuntimeError, match="not a valid Debian package"):
+        extractor.extract_deb(archive, tmp_path / "out")
+
+
+def test_extractor_failure_is_captured_instead_of_corrupting_terminal(capsys) -> None:
+    with pytest.raises(RuntimeError, match="private extractor detail"):
+        extractor._run_cancellable(
+            [sys.executable, "-c", "import sys; sys.stderr.write('private extractor detail\\n'); sys.exit(2)"],
+            cancel=None,
+        )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_cancelling_extractor_stops_its_child_process(tmp_path: Path) -> None:
+    marker = tmp_path / "orphaned-child"
+    child = f"import time, pathlib; time.sleep(1); pathlib.Path({str(marker)!r}).write_text('survived')"
+    parent = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]); "
+        "time.sleep(30)"
+    )
+    cancelled = threading.Event()
+    timer = threading.Timer(0.3, cancelled.set)
+    timer.start()
+    try:
+        with pytest.raises(DownloadCancelled):
+            extractor._run_cancellable([sys.executable, "-c", parent], cancel=cancelled)
+    finally:
+        timer.cancel()
+
+    time.sleep(1.1)
+    assert not marker.exists()
 
 
 def test_tar_traversal_is_rejected(tmp_path: Path) -> None:

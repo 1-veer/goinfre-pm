@@ -3,10 +3,12 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath
 import os
 import shutil
+import signal
 import stat
 # Subprocesses below always use explicit argument arrays and never a shell.
 import subprocess  # nosec B404
 import tarfile
+import tempfile
 import zipfile
 import threading
 import time
@@ -144,43 +146,65 @@ def safe_extract_tar(archive: Path, destination: Path, cancel: threading.Event |
                 os.link(link_target, target)
 
 
-def _run_cancellable(args: list[str], *, cancel: threading.Event | None, cwd: Path | None = None, stdout=None) -> None:
-    if cancel is None:
-        kwargs = {"check": True, "timeout": 180}
-        if cwd is not None:
-            kwargs["cwd"] = cwd
-        if stdout is not None:
-            kwargs["stdout"] = stdout
-        subprocess.run(args, **kwargs)
-        return
-    process = subprocess.Popen(args, cwd=cwd, stdout=stdout)  # nosec B603
-    started = time.monotonic()
+def _process_error(args: list[str], output: bytes) -> RuntimeError:
+    lines = output.decode("utf-8", errors="replace").strip().splitlines()
+    detail = " | ".join(lines[-3:]) if lines else "the extractor returned an error"
+    return RuntimeError(f"Could not extract the downloaded package: {detail}")
+
+
+def _terminate_process_group(process: subprocess.Popen, force: bool = False) -> None:
+    """Stop an extractor and every child it spawned (notably dpkg-deb's tar)."""
     try:
-        while process.poll() is None:
-            if cancel.wait(0.1):
-                process.terminate()
-                try:
-                    process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise DownloadCancelled("Installation cancelled")
-            if time.monotonic() - started > 180:
-                process.kill()
-                process.wait()
-                raise subprocess.TimeoutExpired(args, 180)
-        if process.returncode:
-            raise subprocess.CalledProcessError(process.returncode, args)
-    finally:
+        os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+    except (OSError, ProcessLookupError):
         if process.poll() is None:
-            process.kill()
-            process.wait()
+            process.kill() if force else process.terminate()
+
+
+def _run_cancellable(args: list[str], *, cancel: threading.Event | None, cwd: Path | None = None, stdout=None) -> None:
+    # Capture command output in a file rather than a pipe: extractors can be
+    # verbose enough to fill a pipe, and nothing may write directly over the
+    # Textual screen.
+    with tempfile.TemporaryFile() as capture:
+        output_target = capture if stdout is None else stdout
+        process = subprocess.Popen(  # nosec B603
+            args,
+            cwd=cwd,
+            stdout=output_target,
+            stderr=capture,
+            start_new_session=True,
+        )
+        started = time.monotonic()
+        try:
+            while process.poll() is None:
+                if cancel is not None and cancel.wait(0.1):
+                    _terminate_process_group(process)
+                    try:
+                        process.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        _terminate_process_group(process, force=True)
+                        process.wait()
+                    raise DownloadCancelled("Installation cancelled")
+                if time.monotonic() - started > 180:
+                    _terminate_process_group(process, force=True)
+                    process.wait()
+                    raise RuntimeError("Package extraction timed out after 180 seconds")
+            if process.returncode:
+                capture.seek(0)
+                raise _process_error(args, capture.read())
+        finally:
+            if process.poll() is None:
+                _terminate_process_group(process, force=True)
+                process.wait()
 
 
 def extract_deb(archive: Path, destination: Path, cancel: threading.Event | None = None) -> None:
     dpkg_deb = shutil.which("dpkg-deb")
     if dpkg_deb is None:
         raise RuntimeError("dpkg-deb is required to extract .deb packages")
+    with archive.open("rb") as handle:
+        if handle.read(8) != b"!<arch>\n":
+            raise RuntimeError("The downloaded file is not a valid Debian package")
     # The executable comes from PATH and every dynamic value is one array item.
     _run_cancellable([dpkg_deb, "-x", str(archive), str(destination)], cancel=cancel)
 

@@ -16,10 +16,11 @@ class FakeResponse(BytesIO):
 
 
 class DownloadResponse(FakeResponse):
-    def __init__(self, payload: bytes, url: str = "https://example.invalid/tool.bin") -> None:
+    def __init__(self, payload: bytes, url: str = "https://example.invalid/tool.bin", status: int = 200, headers=None) -> None:
         super().__init__(payload)
-        self.headers = {"Content-Length": str(len(payload)), "Content-Disposition": 'attachment; filename="tool.bin"'}
+        self.headers = headers or {"Content-Length": str(len(payload)), "Content-Disposition": 'attachment; filename="tool.bin"'}
         self._url = url
+        self.status = status
 
     def geturl(self) -> str:
         return self._url
@@ -135,6 +136,43 @@ def test_download_retries_an_interrupted_connection(monkeypatch, tmp_path) -> No
     assert calls == 2
     assert output.read_bytes() == payload
     assert any("retrying" in message for message in messages)
+
+
+def test_download_resumes_partial_transfer(monkeypatch, tmp_path) -> None:
+    payload = b"abcdefghij"
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",),
+    )
+    calls: list[dict[str, str] | None] = []
+
+    class InterruptedResponse(DownloadResponse):
+        def __init__(self):
+            super().__init__(payload, headers={"Content-Length": str(len(payload))})
+            self.reads = 0
+
+        def read(self, _size=-1):
+            self.reads += 1
+            if self.reads == 1:
+                return payload[:4]
+            raise TimeoutError("connection stalled")
+
+    def request(_url, _timeout=30, headers=None):
+        calls.append(headers)
+        if len(calls) == 1:
+            return InterruptedResponse()
+        assert headers == {"Range": "bytes=4-"}
+        return DownloadResponse(
+            payload[4:],
+            status=206,
+            headers={"Content-Length": "6", "Content-Range": "bytes 4-9/10"},
+        )
+
+    monkeypatch.setattr(downloader, "_request", request)
+    output, _version = downloader.download(package, tmp_path)
+
+    assert output.read_bytes() == payload
+    assert calls == [None, {"Range": "bytes=4-"}]
 
 
 def test_download_honors_cancellation_before_connecting(monkeypatch, tmp_path) -> None:
