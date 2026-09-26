@@ -231,10 +231,14 @@ class WelcomeModal(ModalScreen[None]):
                 f"Application payloads → [b]{self.root}[/b]\n"
                 "Launchers and small state → ~/.local and ~/.config\n"
                 "Existing application profiles and settings remain in their normal locations.\n\n"
+                "[b]Auto Setup[/b] — press m to save your usual apps. On another post, "
+                "GoinfrePM offers to restore anything missing. Clean & leave removes the large files "
+                "but keeps your saved setup.\n\n"
                 "Use ↑/↓ to browse, → to enter the package list, Space to select, "
-                "m to save an app in Auto Setup, ^P to choose a theme, t for Starter Packs, "
+                "^P to choose a theme, t for Starter Packs, "
                 "and b to review your basket.\n\nMade by VEER"
-                "\n\nBefore leaving a shared post, press x to remove GoinfrePM data (recommended)."
+                "\n\nBefore leaving a shared post, press x to remove GoinfrePM data (recommended).",
+                id="welcome-copy",
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Start exploring", variant="primary", id="continue")
@@ -779,6 +783,11 @@ class GoinfrePMApp(App[None]):
                 )
                 yield Static("Made by VEER", id="creator")
             with Vertical(id="catalog", classes="panel"):
+                yield Static(
+                    "Saved apps • On another post, GoinfrePM offers to restore anything missing. "
+                    "Press m to add or remove.",
+                    id="auto-setup-guide",
+                )
                 yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="details", classes="panel"):
                 yield Static("Package details", id="details-title")
@@ -1067,6 +1076,7 @@ class GoinfrePMApp(App[None]):
     def _refresh(self, query: str = "", preserve_identifier: str | None = None) -> None:
         if not self.is_running or not list(self.query("#package-table")):
             return
+        self.query_one("#auto-setup-guide", Static).display = self.category == "Auto Setup"
         installed = self.manager.installations.read().get("installed", {})
         preferences = self.state.read()
         setup = set(preferences.get("setup_packages", []))
@@ -1209,7 +1219,10 @@ class GoinfrePMApp(App[None]):
             if self.category == "Favorites":
                 message = "No favorites yet. Highlight a package and press f to keep it here."
             elif self.category == "Auto Setup":
-                message = "Auto Setup is empty. Add apps here to install them automatically after changing posts."
+                message = (
+                    "Auto Setup is empty. Press m on any app to save it here; GoinfrePM will offer "
+                    "to restore it when you change posts."
+                )
             elif self.category == "Installed":
                 message = "Nothing is installed yet. Choose All or a Starter Pack to begin."
             elif self.query_one("#search", Input).value:

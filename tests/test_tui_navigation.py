@@ -3,7 +3,7 @@ import threading
 from types import SimpleNamespace
 
 from textual.command import CommandPalette
-from textual.widgets import Button, DataTable, Input, OptionList
+from textual.widgets import Button, DataTable, Input, OptionList, Static
 
 from goinfre_pm import app as app_module
 from goinfre_pm.models import InstalledPackage, Package
@@ -176,10 +176,16 @@ def test_onboarding_is_skippable_and_only_shown_once(monkeypatch, tmp_path) -> N
 
     async def scenario() -> None:
         first = app_module.GoinfrePMApp()
-        async with first.run_test(size=(120, 36)) as pilot:
+        async with first.run_test(size=(80, 24)) as pilot:
             await pilot.press("escape")
             await pilot.pause()
             assert isinstance(first.screen, app_module.WelcomeModal)
+            welcome_copy = str(first.screen.query_one("#welcome-copy", Static).renderable)
+            assert "Auto Setup" in welcome_copy
+            assert "offers to restore anything missing" in welcome_copy
+            assert "keeps your saved setup" in welcome_copy
+            continue_button = first.screen.query_one("#continue", Button)
+            assert continue_button.region.bottom <= first.screen.size.height
             await pilot.press("escape")
             await pilot.pause()
             assert state.read()["onboarding_complete"] is True
@@ -212,6 +218,9 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
 
             app.category = "Auto Setup"
             app._refresh()
+            guide = app.query_one("#auto-setup-guide", Static)
+            assert guide.display is True
+            assert "offers to restore anything missing" in str(guide.renderable)
             assert [package.identifier for package in app.visible_packages] == [packages[0].identifier]
             assert "Not installed here" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
             categories = app.query_one(OptionList)
@@ -224,6 +233,11 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
             await pilot.click("#setup-toggle-button")
             await pilot.pause()
             assert state.read()["setup_packages"] == []
+            assert "GoinfrePM will offer to restore it" in str(app.query_one("#details-body", Static).renderable)
+
+            app.category = "All"
+            app._refresh()
+            assert guide.display is False
 
     asyncio.run(scenario())
 

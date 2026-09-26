@@ -23,6 +23,7 @@ Screen { background: $gpm-background; color: $gpm-text; layers: base overlay; }
 #categories OptionList > .option-list--option-highlighted { background: #4c1d70; color: $gpm-text; }
 #categories OptionList:focus > .option-list--option-highlighted { background: $gpm-violet; color: $gpm-background; text-style: bold; }
 #catalog { width: 2fr; min-width: 38; }
+#auto-setup-guide { display: none; height: 2; padding: 0 1; background: $gpm-panel-raised; color: $gpm-muted; content-align: left middle; }
 #package-table { height: 1fr; background: $gpm-panel; }
 #package-table > .datatable--cursor { background: #5b2182; color: $gpm-text; }
 #package-table:focus > .datatable--cursor { background: $gpm-violet; color: $gpm-background; text-style: bold; }
