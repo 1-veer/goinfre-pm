@@ -38,6 +38,11 @@ Screen { background: $gpm-background; color: $gpm-text; layers: base overlay; }
 #search { dock: bottom; height: 3; display: none; border: round $gpm-violet; background: $gpm-panel-raised; }
 #search.visible { display: block; }
 Footer { background: $gpm-panel-raised; color: $gpm-muted; }
+FooterKey { background: $gpm-panel-raised; color: $gpm-lavender; }
+FooterKey .footer-key--key { background: $gpm-violet; color: $gpm-background; text-style: bold; padding: 0 1; }
+FooterKey .footer-key--description { color: $gpm-lavender; padding: 0 1 0 0; }
+FooterKey:hover { background: #332243; color: $gpm-text; }
+FooterKey:hover .footer-key--key { background: $gpm-lavender; color: $gpm-background; }
 ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .modal { width: 64; max-width: 90%; height: auto; background: $gpm-panel-raised; border: round $gpm-violet; padding: 1 2; }
 .modal-title { color: $gpm-lavender; text-style: bold; height: 2; }
@@ -92,6 +97,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
    built-in Ctrl+P command palette. Purple above remains the default. */
 .theme-green Screen { background: #07110c; color: #f1f7f3; }
 .theme-green #header, .theme-green #tasks, .theme-green Footer { background: #14251b; }
+.theme-green FooterKey { background: #14251b; color: #86efac; }
+.theme-green FooterKey .footer-key--key { background: #22c55e; color: #07110c; }
+.theme-green FooterKey .footer-key--description { color: #86efac; }
 .theme-green #header { border-bottom: solid #22c55e; }
 .theme-green .panel { background: #0d1a13; border: round #28533a; }
 .theme-green .panel:focus-within { border: heavy #22c55e; }
@@ -115,6 +123,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 
 .theme-blue Screen { background: #070b14; color: #f2f6fc; }
 .theme-blue #header, .theme-blue #tasks, .theme-blue Footer { background: #14213a; }
+.theme-blue FooterKey { background: #14213a; color: #93c5fd; }
+.theme-blue FooterKey .footer-key--key { background: #3b82f6; color: #07111f; }
+.theme-blue FooterKey .footer-key--description { color: #93c5fd; }
 .theme-blue #header { border-bottom: solid #3b82f6; }
 .theme-blue .panel { background: #0d1524; border: round #294a78; }
 .theme-blue .panel:focus-within { border: heavy #3b82f6; }
@@ -138,6 +149,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 
 .theme-black Screen { background: #030303; color: #f5f5f5; }
 .theme-black #header, .theme-black #tasks, .theme-black Footer { background: #151515; }
+.theme-black FooterKey { background: #151515; color: #d4d4d4; }
+.theme-black FooterKey .footer-key--key { background: #a3a3a3; color: #080808; }
+.theme-black FooterKey .footer-key--description { color: #d4d4d4; }
 .theme-black #header { border-bottom: solid #d4d4d4; }
 .theme-black .panel { background: #0b0b0b; border: round #383838; }
 .theme-black .panel:focus-within { border: heavy #d4d4d4; }
@@ -161,6 +175,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 
 .theme-red Screen { background: #120708; color: #fbf3f3; }
 .theme-red #header, .theme-red #tasks, .theme-red Footer { background: #2b1517; }
+.theme-red FooterKey { background: #2b1517; color: #fca5a5; }
+.theme-red FooterKey .footer-key--key { background: #ef4444; color: #160607; }
+.theme-red FooterKey .footer-key--description { color: #fca5a5; }
 .theme-red #header { border-bottom: solid #ef4444; }
 .theme-red .panel { background: #201011; border: round #6b2b30; }
 .theme-red .panel:focus-within { border: heavy #ef4444; }
@@ -187,6 +204,10 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
    preserve the selected color theme as the accent. */
 .-light-mode Screen { background: #f6f4f9; color: #292335; }
 .-light-mode #header, .-light-mode #tasks, .-light-mode Footer { background: #eae5f0; color: #50475e; }
+.-light-mode FooterKey { background: #eae5f0; color: #5b21a1; }
+.-light-mode FooterKey .footer-key--key { background: #7c3aed; color: #ffffff; }
+.-light-mode FooterKey .footer-key--description { color: #5b21a1; }
+.-light-mode FooterKey:hover { background: #ddd3e7; color: #292335; }
 .-light-mode #header { border-bottom: solid #7c3aed; }
 .-light-mode .panel { background: #fffdfd; border: round #b7a8c9; border-title-color: #655a70; }
 .-light-mode .panel:focus-within { border: heavy #7c3aed; border-title-color: #292335; }
@@ -219,6 +240,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .-light-mode CommandList > .option-list--option-highlighted { background: #7c3aed; color: #ffffff; }
 
 .-light-mode.theme-green #header, .-light-mode.theme-green #tasks, .-light-mode.theme-green Footer { background: #e5f1e8; }
+.-light-mode.theme-green FooterKey { background: #e5f1e8; }
+.-light-mode.theme-green FooterKey .footer-key--key { background: #16803b; color: #ffffff; }
+.-light-mode.theme-green FooterKey .footer-key--description { color: #116329; }
 .-light-mode.theme-green .panel { border: round #a4c7ad; }
 .-light-mode.theme-green #header { border-bottom: solid #16803b; }
 .-light-mode.theme-green .panel:focus-within { border: heavy #16803b; }
@@ -235,6 +259,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .-light-mode.theme-green Button.-primary, .-light-mode.theme-green CommandList > .option-list--option-highlighted { background: #16803b; color: #ffffff; }
 
 .-light-mode.theme-blue #header, .-light-mode.theme-blue #tasks, .-light-mode.theme-blue Footer { background: #e5edf9; }
+.-light-mode.theme-blue FooterKey { background: #e5edf9; }
+.-light-mode.theme-blue FooterKey .footer-key--key { background: #2563bb; color: #ffffff; }
+.-light-mode.theme-blue FooterKey .footer-key--description { color: #174d96; }
 .-light-mode.theme-blue .panel { border: round #aabedb; }
 .-light-mode.theme-blue #header { border-bottom: solid #2563bb; }
 .-light-mode.theme-blue .panel:focus-within { border: heavy #2563bb; }
@@ -251,6 +278,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .-light-mode.theme-blue Button.-primary, .-light-mode.theme-blue CommandList > .option-list--option-highlighted { background: #2563bb; color: #ffffff; }
 
 .-light-mode.theme-black #header, .-light-mode.theme-black #tasks, .-light-mode.theme-black Footer { background: #e8e8e8; }
+.-light-mode.theme-black FooterKey { background: #e8e8e8; }
+.-light-mode.theme-black FooterKey .footer-key--key { background: #404040; color: #ffffff; }
+.-light-mode.theme-black FooterKey .footer-key--description { color: #303030; }
 .-light-mode.theme-black .panel { border: round #a9a9a9; }
 .-light-mode.theme-black #header { border-bottom: solid #404040; }
 .-light-mode.theme-black .panel:focus-within { border: heavy #404040; }
@@ -267,6 +297,9 @@ ModalScreen { align: center middle; background: rgba(13, 9, 20, 0.7); }
 .-light-mode.theme-black Button.-primary, .-light-mode.theme-black CommandList > .option-list--option-highlighted { background: #404040; color: #ffffff; }
 
 .-light-mode.theme-red #header, .-light-mode.theme-red #tasks, .-light-mode.theme-red Footer { background: #f8e9e9; }
+.-light-mode.theme-red FooterKey { background: #f8e9e9; }
+.-light-mode.theme-red FooterKey .footer-key--key { background: #b72e36; color: #ffffff; }
+.-light-mode.theme-red FooterKey .footer-key--description { color: #8f2027; }
 .-light-mode.theme-red .panel { border: round #dbb3b3; }
 .-light-mode.theme-red #header { border-bottom: solid #b72e36; }
 .-light-mode.theme-red .panel:focus-within { border: heavy #b72e36; }

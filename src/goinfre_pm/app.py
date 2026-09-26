@@ -5,11 +5,12 @@ from pathlib import Path
 import threading
 import time
 
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import DescendantFocus, Resize
+from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, DataTable, Footer, Input, Label, OptionList, ProgressBar, RichLog, Static
 from textual.widgets.option_list import Option
@@ -749,23 +750,59 @@ class DoctorModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class PackageTable(DataTable):
+    """Package table with deliberate, row-aware double-click handling."""
+
+    class DoubleClicked(Message):
+        def __init__(self, table: "PackageTable", row_index: int) -> None:
+            self.table = table
+            self.row_index = row_index
+            super().__init__()
+
+        @property
+        def control(self) -> "PackageTable":
+            return self.table
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_clicked_row: int | None = None
+        self._last_click_time = 0.0
+
+    async def _on_click(self, event: events.Click) -> None:
+        meta = event.style.meta
+        row = meta.get("row")
+        is_data_row = isinstance(row, int) and row >= 0 and "column" in meta and event.button == 1
+        now = time.monotonic()
+        double_clicked = bool(
+            is_data_row
+            and self._last_clicked_row == row
+            and now - self._last_click_time <= 0.5
+        )
+        await super()._on_click(event)
+        if is_data_row:
+            self._last_clicked_row = None if double_clicked else row
+            self._last_click_time = 0.0 if double_clicked else now
+        if double_clicked:
+            self.post_message(self.DoubleClicked(self, row))
+
+
 class GoinfrePMApp(App[None]):
     CSS_PATH = "theme.tcss"
     TITLE = DISPLAY_NAME
     BINDINGS = [
         Binding("q", "quit", "Exit"), Binding("x", "leave_post", "Clean & leave"),
+        Binding("i", "install_one", "Install"), Binding("c", "cancel_operation", "Cancel"),
         Binding("escape", "back", "Back", show=False),
         Binding("j", "down", "Down", show=False), Binding("k", "up", "Up", show=False),
         Binding("right", "focus_packages", "Packages", show=False, priority=True),
         Binding("left", "focus_categories", "Categories", show=False, priority=True),
         Binding("space", "toggle", "Select"), Binding("slash", "search", "Search"),
-        Binding("i", "install_one", "Install"), Binding("alt+i", "install_selected", "Install selected"),
+        Binding("alt+i", "install_selected", "Install selected"),
         Binding("r", "remove_one", "Remove"), Binding("alt+r", "remove_selected", "Remove selected"),
         Binding("a", "select_all", "Select all"), Binding("p", "path", "Path"),
-        Binding("t", "starter_packs", "Packs"), Binding("b", "basket", "Basket"),
+        Binding("t", "starter_packs", "Packs", show=False), Binding("b", "basket", "Basket"),
         Binding("f", "favorite", "Favorite"), Binding("s", "sort", "Sort"),
         Binding("m", "setup_toggle", "Auto Setup"), Binding("shift+m", "setup_selected", "Save selected", show=False),
-        Binding("c", "cancel_operation", "Cancel"),
         Binding("d", "doctor", "Doctor"), Binding("w", "welcome", "Welcome", show=False),
         Binding("l", "logs", "Logs"), Binding("question_mark", "help", "Help"),
         Binding("enter", "primary", "Open", show=False),
@@ -814,7 +851,7 @@ class GoinfrePMApp(App[None]):
                     "Press m to add or remove apps.",
                     id="auto-setup-guide",
                 )
-                yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
+                yield PackageTable(id="package-table", cursor_type="row", zebra_stripes=True)
             with Vertical(id="details", classes="panel"):
                 yield Static("Package details", id="details-title")
                 yield Static(id="details-body")
@@ -1326,6 +1363,10 @@ class GoinfrePMApp(App[None]):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.data_table.id == "package-table" and not isinstance(self.screen, ModalScreen):
             self.action_primary()
+
+    def on_package_table_double_clicked(self, event: PackageTable.DoubleClicked) -> None:
+        if event.table.id == "package-table" and not isinstance(self.screen, ModalScreen):
+            self.action_install_one()
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
         if event.option_list.id == "category-list" and not isinstance(self.screen, ModalScreen):

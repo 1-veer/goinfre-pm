@@ -112,6 +112,9 @@ def test_batch_shortcuts_use_alt_and_pass_every_selected_package(monkeypatch, tm
     monkeypatch.setattr(app_module, "load_packages", lambda: packages)
     monkeypatch.setattr(app_module, "StateStore", lambda: state)
     bindings = {binding.key: binding.action for binding in app_module.GoinfrePMApp.BINDINGS}
+    visible_keys = [binding.key for binding in app_module.GoinfrePMApp.BINDINGS if binding.show]
+    assert visible_keys[:4] == ["q", "x", "i", "c"]
+    assert "t" not in visible_keys
     assert bindings["alt+i"] == "install_selected"
     assert bindings["alt+r"] == "remove_selected"
     assert "shift+i" not in bindings
@@ -145,6 +148,32 @@ def test_batch_shortcuts_use_alt_and_pass_every_selected_package(monkeypatch, tm
                 package.identifier for package in packages[:3]
             ]
             assert captured[0][1] == "remove"
+
+    asyncio.run(scenario())
+
+
+def test_double_click_installs_the_clicked_package(monkeypatch, tmp_path) -> None:
+    packages = _packages()
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        calls: list[tuple[list[Package], str]] = []
+        app._run_packages = lambda items, operation, keep_setup=False: calls.append(  # type: ignore[method-assign]
+            (list(items), operation)
+        )
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            assert await pilot.click("#package-table", offset=(5, 1))
+            await pilot.pause()
+            assert calls == []
+            assert await pilot.click("#package-table", offset=(5, 1))
+            await pilot.pause()
+            assert calls == [([packages[0]], "install")]
 
     asyncio.run(scenario())
 

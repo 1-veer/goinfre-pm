@@ -229,6 +229,7 @@ and state are not removed.
 | `Space` | Select or deselect (`☐` / `☑`; favorites show `★`) |
 | `/` | Search |
 | `Enter` | Open actions for an installed desktop application |
+| Mouse double-click | Install the available package under the pointer |
 | `i` / `Alt+I` | Install highlighted or open installed-app actions / review selected basket |
 | `r` / `Alt+R` | Confirm and remove highlighted / selected installed packages |
 | `a` | Select/deselect visible packages |
