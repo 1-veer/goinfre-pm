@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -12,6 +13,10 @@ from .integration import AUTOSTART_DIR
 from .installer import PackageManager
 from .models import validate_package_id
 from .storage import Layout, StateStore, available_space, is_writable_directory, persist_root, resolve_install_root, verify_install_root
+
+
+def _invocation() -> str:
+    return os.environ.get("GPM_INVOKED_AS", COMMAND).strip() or COMMAND
 
 
 def _human_size(value: int) -> str:
@@ -26,7 +31,7 @@ def _human_size(value: int) -> str:
 def _root_or_error() -> Path:
     root = resolve_install_root()
     if root is None:
-        raise RuntimeError(f"No writable goinfre root found. Choose one with `{COMMAND} path set DIRECTORY`.")
+        raise RuntimeError(f"No writable goinfre root found. Choose one with `{_invocation()} path set DIRECTORY`.")
     return root
 
 
@@ -120,7 +125,8 @@ def doctor() -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=COMMAND, description=f"{DISPLAY_NAME} — no-sudo goinfre package manager")
+    invocation = _invocation()
+    parser = argparse.ArgumentParser(prog=invocation, description=f"{DISPLAY_NAME} — no-sudo goinfre package manager")
     parser.add_argument("--no-restore", action="store_true", help="skip the Auto Setup startup prompt for this launch")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("list", help="list packages")
@@ -188,13 +194,14 @@ def _print_packages(query: str = "") -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    invocation = _invocation()
     args = build_parser().parse_args(argv)
     try:
         if args.command is None:
             root = resolve_install_root()
             if root is None:
                 if not sys.stdin.isatty():
-                    raise RuntimeError(f"No goinfre root found; run `{COMMAND} path set DIRECTORY` first")
+                    raise RuntimeError(f"No goinfre root found; run `{invocation} path set DIRECTORY` first")
                 chosen = Path(input("Writable goinfre directory: ").strip()).expanduser().resolve()
                 if not is_writable_directory(chosen, create=True):
                     raise RuntimeError(f"Path is not writable: {chosen}")
@@ -318,14 +325,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{DISPLAY_NAME} {VERSION}")
         return 0
     except (ConfigurationError, OSError, RuntimeError, ValueError) as exc:
-        print(f"{COMMAND}: error: {error_text(exc)}", file=sys.stderr)
+        print(f"{invocation}: error: {error_text(exc)}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print(f"\n{COMMAND}: cancelled", file=sys.stderr)
+        print(f"\n{invocation}: cancelled", file=sys.stderr)
         return 130
     except Exception as exc:
         crash_log = write_crash_log(exc)
-        print(f"{COMMAND}: unexpected error: {error_text(exc)}", file=sys.stderr)
+        print(f"{invocation}: unexpected error: {error_text(exc)}", file=sys.stderr)
         if crash_log:
             print(f"Details saved to {crash_log}", file=sys.stderr)
         return 1

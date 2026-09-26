@@ -706,7 +706,11 @@ class PackageManager:
                 yield ("log", f"Downloading {package.name}")
 
                 def on_progress(done: int, total: int | None) -> None:
-                    nonlocal last_transfer_emit
+                    nonlocal download_started, last_transfer_emit
+                    if done == 0:
+                        download_started = time.monotonic()
+                        last_transfer_emit = 0.0
+                        return
                     elapsed = max(time.monotonic() - download_started, 0.001)
                     speed = done / elapsed
                     eta = (total - done) / speed if total is not None and speed > 0 else None
@@ -723,7 +727,7 @@ class PackageManager:
                 if cancel is not None and cancel.is_set():
                     raise DownloadCancelled("Installation cancelled")
                 yield ("progress", 45)
-                extract_download(archive, staging, package.source_type, operation)
+                extract_download(archive, staging, package.source_type, operation, cancel)
                 if cancel is not None and cancel.is_set():
                     raise DownloadCancelled("Installation cancelled")
                 self._apply_actions(package, staging)
@@ -826,14 +830,20 @@ class PackageManager:
             live = self.layout.apps / identifier
             if live.parent.resolve() != self.layout.apps.resolve() or live.name != identifier:
                 raise RuntimeError(f"Unsafe application removal target: {live}")
+            state = self.installations.read()
+            record = state.get("installed", {}).get(identifier, {})
+            if not live.exists() and not isinstance(record, dict):
+                yield ("log", f"{package.name} is already removed")
+                return
+            if not live.exists() and not record:
+                yield ("log", f"{package.name} is already removed")
+                return
             setup_was_selected = identifier in set(self.state.read().get("setup_packages", []))
             if setup_was_selected and not keep_setup:
                 # Forget first so a successful removal can never be unexpectedly
                 # restored. If the root mutation fails, restore the preference.
                 self.state.set_setup_package(identifier, False)
             try:
-                state = self.installations.read()
-                record = state.get("installed", {}).get(identifier, {})
                 remove_integration(package, record.get("launchers", []) if isinstance(record, dict) else [])
                 if live.is_dir():
                     shutil.rmtree(live)

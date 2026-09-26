@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+import http.client
 import json
 import hashlib
 import re
+import socket
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -138,29 +141,63 @@ def download(
     progress = progress or (lambda _done, _total: None)
     url, version = (resolve_github_release(package, log) if package.source_type == "github" else (package.url, package.version))
     destination.mkdir(parents=True, exist_ok=True)
-    with _request(url, timeout=30) as response:
-        filename = _response_name(response, url)
-        output = destination / filename
-        total_header = response.headers.get("Content-Length")
-        total = int(total_header) if total_header and total_header.isdigit() else None
-        written = 0
+    output: Path | None = None
+    written = 0
+    total: int | None = None
+    last_error: BaseException | None = None
+    # Campus mirrors and Wi-Fi occasionally accept a connection that then
+    # stops delivering data. Reconnect automatically instead of requiring the
+    # student to cancel and start the entire install again.
+    for attempt in range(1, 4):
+        if cancel and cancel.is_set():
+            raise DownloadCancelled("Download cancelled")
         try:
-            with output.open("xb") as handle:
-                while True:
-                    if cancel and cancel.is_set():
-                        raise DownloadCancelled("Download cancelled")
-                    chunk = response.read(128 * 1024)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    written += len(chunk)
-                    progress(written, total)
-        except BaseException:
-            output.unlink(missing_ok=True)
+            with _request(url, timeout=8) as response:
+                filename = _response_name(response, url)
+                output = destination / filename
+                output.unlink(missing_ok=True)
+                total_header = response.headers.get("Content-Length")
+                total = int(total_header) if total_header and total_header.isdigit() else None
+                written = 0
+                started = time.monotonic()
+                window_started = started
+                window_bytes = 0
+                with output.open("xb") as handle:
+                    while True:
+                        if cancel and cancel.is_set():
+                            raise DownloadCancelled("Download cancelled")
+                        chunk = response.read(128 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        written += len(chunk)
+                        window_bytes += len(chunk)
+                        progress(written, total)
+                        now = time.monotonic()
+                        window_elapsed = now - window_started
+                        if attempt < 3 and window_elapsed >= 30 and window_bytes / window_elapsed < 32 * 1024:
+                            raise TimeoutError("download stayed below 32 KiB/s for 30 seconds")
+                        if window_elapsed >= 30:
+                            window_started, window_bytes = now, 0
+            if total is not None and written != total:
+                raise http.client.IncompleteRead(b"", total - written)
+            break
+        except DownloadCancelled:
+            if output is not None:
+                output.unlink(missing_ok=True)
             raise
-    if total is not None and written != total:
-        output.unlink(missing_ok=True)
-        raise RuntimeError(f"Incomplete download: expected {total} bytes, received {written}")
+        except (OSError, RuntimeError, TimeoutError, http.client.HTTPException, socket.timeout) as exc:
+            last_error = exc
+            if output is not None:
+                output.unlink(missing_ok=True)
+            if attempt == 3:
+                raise RuntimeError(f"Download failed after 3 attempts: {exc}") from exc
+            log(f"Download connection was too slow or interrupted; retrying ({attempt}/3)")
+            progress(0, total)
+            if cancel and cancel.wait(min(attempt, 2)):
+                raise DownloadCancelled("Download cancelled") from exc
+    if output is None:
+        raise RuntimeError(f"Download failed: {last_error or 'no response'}")
     if package.sha256:
         try:
             digest = hashlib.sha256()

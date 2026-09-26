@@ -224,7 +224,7 @@ def test_reinstall_rolls_back_after_promoting_a_broken_replacement(monkeypatch, 
     archive = tmp_path / "tool.tar.gz"
     archive.touch()
 
-    def fake_extract(_archive, destination, _source_type, _operation) -> None:
+    def fake_extract(_archive, destination, _source_type, _operation, _cancel=None) -> None:
         replacement = destination / "bin" / "tool"
         replacement.parent.mkdir(parents=True)
         replacement.write_text("new payload", encoding="utf-8")
@@ -265,6 +265,16 @@ def test_removal_defaults_to_forget_but_can_keep_setup(monkeypatch, tmp_path: Pa
     healthy_install(manager, item, user_bin)
     list(manager.remove("tool"))
     assert preferences.read()["setup_packages"] == []
+
+
+def test_removing_an_already_removed_package_is_a_noop(tmp_path: Path) -> None:
+    item = package("tool")
+    preferences = StateStore(tmp_path / "state.json")
+    preferences.set_setup_package("tool", True)
+    manager = PackageManager(Layout.at(tmp_path / "goinfre-pm"), [item], preferences)
+
+    assert list(manager.remove("tool")) == [("log", "Tool is already removed")]
+    assert preferences.read()["setup_packages"] == ["tool"]
 
 
 def test_normal_removal_preserves_user_configuration(monkeypatch, tmp_path: Path) -> None:

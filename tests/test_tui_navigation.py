@@ -40,9 +40,10 @@ def test_arrow_focus_and_space_preserve_package(monkeypatch, tmp_path) -> None:
             name=f"Tool {number}",
             description="Test package",
             category="Developer Tools",
-            url=f"https://example.invalid/tool-{number}.tar.gz",
-            source_type="tar",
-            executable_candidates=(f"tool-{number}",),
+                url=f"https://example.invalid/tool-{number}.tar.gz",
+                source_type="tar",
+                architectures=("any",),
+                executable_candidates=(f"tool-{number}",),
         )
         for number in range(3)
     ]
@@ -82,21 +83,68 @@ def test_arrow_focus_and_space_preserve_package(monkeypatch, tmp_path) -> None:
             assert table.has_focus
 
             app.busy = True
+            was_selected = packages[2].selected
+            await pilot.press("space")
+            assert packages[2].selected is not was_selected
+            current = app._current()
+            assert current is not None
+            app.action_setup_toggle()
+            assert current.identifier in app.state.read()["setup_packages"]
             await pilot.press("q")
             assert app.is_running
             app.busy = False
 
             table.focus()
             await pilot.press("r")
-            assert isinstance(app.screen, app_module.ConfirmModal)
-            assert app.screen.query_one("#confirm", Button).has_focus
-            await pilot.press("right")
-            assert app.screen.query_one("#cancel", Button).has_focus
-            await pilot.press("enter")
             await pilot.pause()
             assert not isinstance(app.screen, app_module.ConfirmModal)
             assert app.query_one(DataTable)
             assert app.is_running
+
+    asyncio.run(scenario())
+
+
+def test_batch_shortcuts_use_alt_and_pass_every_selected_package(monkeypatch, tmp_path) -> None:
+    packages = _packages()
+    state = StateStore(tmp_path / "state.json")
+    state.set_onboarding_complete()
+    monkeypatch.setattr(app_module, "resolve_install_root", lambda: tmp_path / "goinfre-pm")
+    monkeypatch.setattr(app_module, "load_packages", lambda: packages)
+    monkeypatch.setattr(app_module, "StateStore", lambda: state)
+    bindings = {binding.key: binding.action for binding in app_module.GoinfrePMApp.BINDINGS}
+    assert bindings["alt+i"] == "install_selected"
+    assert bindings["alt+r"] == "remove_selected"
+    assert "shift+i" not in bindings
+    assert "shift+r" not in bindings
+
+    async def scenario() -> None:
+        app = app_module.GoinfrePMApp(auto_restore=False)
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.pause(0.3)
+            for package in packages[:3]:
+                package.selected = True
+            app.action_install_selected()
+            await pilot.pause()
+            assert isinstance(app.screen, app_module.BasketModal)
+            assert [package.identifier for package in app.screen.packages] == [
+                package.identifier for package in packages[:3]
+            ]
+            await pilot.press("escape")
+            captured: list[tuple[list[Package], str]] = []
+            app.manager.installed = lambda identifier: identifier in {  # type: ignore[method-assign]
+                package.identifier for package in packages[:3]
+            }
+            app._run_packages = lambda items, operation, keep_setup=False: captured.append(  # type: ignore[method-assign]
+                (list(items), operation)
+            )
+            app.action_remove_selected()
+            assert isinstance(app.screen, app_module.ConfirmModal)
+            await pilot.press("enter")
+            await pilot.pause()
+            assert [package.identifier for package in captured[0][0]] == [
+                package.identifier for package in packages[:3]
+            ]
+            assert captured[0][1] == "remove"
 
     asyncio.run(scenario())
 
@@ -894,6 +942,8 @@ def test_progress_and_completion_summary(monkeypatch, tmp_path) -> None:
             await pilot.pause()
             prompt.start_progress()
             await pilot.pause()
+            assert prompt.query_one("#browse", Button).display
+            assert not prompt.query_one("#browse", Button).disabled
             modal_height = prompt.query_one(".auto-setup-prompt-modal").region.height
             for done in (1024, 2048, 3072):
                 app._show_transfer(package, done, 4096, 512, 6.0)

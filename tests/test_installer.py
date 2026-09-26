@@ -256,7 +256,7 @@ def test_first_install_is_cleaned_up_when_integration_fails(monkeypatch, tmp_pat
     archive = tmp_path / "tool.tar.xz"
     archive.touch()
 
-    def fake_extract(_archive, destination, _source_type, _work) -> None:
+    def fake_extract(_archive, destination, _source_type, _work, _cancel=None) -> None:
         executable = destination / "bin" / "tool"
         executable.parent.mkdir(parents=True)
         executable.write_text("#!/bin/sh\n", encoding="utf-8")

@@ -1,6 +1,7 @@
 from io import BytesIO
 import hashlib
 import json
+import threading
 
 from goinfre_pm import downloader
 from goinfre_pm.models import Package
@@ -107,4 +108,47 @@ def test_download_removes_file_on_checksum_mismatch(monkeypatch, tmp_path) -> No
         raise AssertionError("checksum mismatch was accepted")
     except RuntimeError as exc:
         assert "Checksum mismatch" in str(exc)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_download_retries_an_interrupted_connection(monkeypatch, tmp_path) -> None:
+    payload = b"recovered download"
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",),
+    )
+    calls = 0
+
+    class InterruptedResponse(DownloadResponse):
+        def read(self, _size=-1):
+            raise TimeoutError("campus connection stalled")
+
+    def request(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return InterruptedResponse(payload) if calls == 1 else DownloadResponse(payload)
+
+    monkeypatch.setattr(downloader, "_request", request)
+    messages: list[str] = []
+    output, _version = downloader.download(package, tmp_path, log=messages.append)
+
+    assert calls == 2
+    assert output.read_bytes() == payload
+    assert any("retrying" in message for message in messages)
+
+
+def test_download_honors_cancellation_before_connecting(monkeypatch, tmp_path) -> None:
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",),
+    )
+    cancelled = threading.Event()
+    cancelled.set()
+    monkeypatch.setattr(downloader, "_request", lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError()))
+
+    try:
+        downloader.download(package, tmp_path, cancel=cancelled)
+        raise AssertionError("cancelled download was started")
+    except downloader.DownloadCancelled:
+        pass
     assert list(tmp_path.iterdir()) == []

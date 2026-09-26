@@ -17,6 +17,7 @@ from textual.widgets.option_list import Option
 from .branding import DISPLAY_NAME, VERSION
 from .config import load_packages
 from .doctor import DoctorCheck, collect_doctor_checks
+from .downloader import DownloadCancelled
 from .errors import error_text, write_crash_log
 from .experience import STARTER_PACKS, StarterPack, apply_starter_pack, estimate_basket, human_size, sort_packages
 from .installer import OperationBusyError, PackageManager
@@ -72,11 +73,18 @@ class ConfirmModal(ModalScreen[bool]):
 class PackageActionModal(ModalScreen[str | None]):
     BINDINGS = [Binding("escape", "cancel", "Cancel", show=False)]
 
-    def __init__(self, package: Package, repairable: bool, launchable: bool = True) -> None:
+    def __init__(
+        self,
+        package: Package,
+        repairable: bool,
+        launchable: bool = True,
+        update_allowed: bool = True,
+    ) -> None:
         super().__init__()
         self.package = package
         self.repairable = repairable
         self.launchable = launchable
+        self.update_allowed = update_allowed
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal action-modal"):
@@ -94,7 +102,7 @@ class PackageActionModal(ModalScreen[str | None]):
                         "Update",
                         variant="default" if self.launchable else "primary",
                         id="update",
-                        disabled=not self.package.enabled or not self.package.compatible,
+                        disabled=not self.update_allowed or not self.package.enabled or not self.package.compatible,
                     )
                     yield Button("Reinstall", id="reinstall", disabled=not self.package.enabled or not self.package.compatible)
                 with Horizontal(classes="action-button-row"):
@@ -200,7 +208,7 @@ class HelpModal(ModalScreen[None]):
             yield Label("Keyboard shortcuts", classes="modal-title")
             yield Static(
                 "↑/↓ or j/k navigate   ←/→ change pane   Space select\n"
-                "Enter open/launch   i install/actions   I/b basket   r/R remove\n"
+                "Enter open/launch   i install/actions   Alt+I/b basket   r/Alt+R remove\n"
                 "a select visible\n"
                 "m toggle Auto Setup   M add selection   c cancel operation\n"
                 "t Starter Packs   f favorite   s sort   d Doctor   x leave-post cleanup\n"
@@ -289,6 +297,7 @@ class AutoSetupPromptModal(ModalScreen[bool]):
             )
             with Horizontal(classes="modal-buttons"):
                 yield Button("Install now", variant="primary", id="install")
+                yield Button("Browse packages", id="browse", disabled=True)
                 yield Button("Not now", id="cancel")
 
     def _package_lines(self) -> str:
@@ -309,6 +318,9 @@ class AutoSetupPromptModal(ModalScreen[bool]):
         install = self.query_one("#install", Button)
         install.label = "Installing…"
         install.disabled = True
+        browse = self.query_one("#browse", Button)
+        browse.disabled = False
+        browse.display = True
         cancel = self.query_one("#cancel", Button)
         cancel.label = "Cancel safely"
         cancel.focus()
@@ -322,13 +334,17 @@ class AutoSetupPromptModal(ModalScreen[bool]):
         self.query_one("#install", Button).focus()
 
     def focus_button(self, delta: int) -> None:
-        buttons = list(self.query(Button))
+        buttons = [button for button in self.query(Button) if not button.disabled and button.display]
+        if not buttons:
+            return
         focused = self.focused
         index = buttons.index(focused) if focused in buttons else 0
         buttons[(index + delta) % len(buttons)].focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "install":
+        if event.button.id == "browse" and self.running:
+            self.dismiss(None)
+        elif event.button.id == "install":
             if self.on_install is None:
                 self.dismiss(True)
                 return
@@ -376,13 +392,23 @@ class AutoSetupProgressModal(ModalScreen[None]):
                 id="auto-setup-live-note",
             )
             with Horizontal(classes="modal-buttons"):
+                yield Button("Browse packages", variant="primary", id="browse")
                 yield Button("Cancel safely", id="cancel")
 
     def on_mount(self) -> None:
         self.query_one("#cancel", Button).focus()
 
-    def on_button_pressed(self, _event: Button.Pressed) -> None:
-        self.action_cancel()
+    def focus_button(self, delta: int) -> None:
+        buttons = list(self.query(Button))
+        focused = self.focused
+        index = buttons.index(focused) if focused in buttons else 0
+        buttons[(index + delta) % len(buttons)].focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "browse":
+            self.dismiss(None)
+        else:
+            self.action_cancel()
 
     def action_cancel(self) -> None:
         button = self.query_one("#cancel", Button)
@@ -733,13 +759,13 @@ class GoinfrePMApp(App[None]):
         Binding("right", "focus_packages", "Packages", show=False, priority=True),
         Binding("left", "focus_categories", "Categories", show=False, priority=True),
         Binding("space", "toggle", "Select"), Binding("slash", "search", "Search"),
-        Binding("i", "install_one", "Install"), Binding("shift+i", "install_selected", "Install selected"),
-        Binding("r", "remove_one", "Remove"), Binding("shift+r", "remove_selected", "Remove selected"),
+        Binding("i", "install_one", "Install"), Binding("alt+i", "install_selected", "Install selected"),
+        Binding("r", "remove_one", "Remove"), Binding("alt+r", "remove_selected", "Remove selected"),
         Binding("a", "select_all", "Select all"), Binding("p", "path", "Path"),
         Binding("t", "starter_packs", "Packs"), Binding("b", "basket", "Basket"),
         Binding("f", "favorite", "Favorite"), Binding("s", "sort", "Sort"),
         Binding("m", "setup_toggle", "Auto Setup"), Binding("shift+m", "setup_selected", "Save selected", show=False),
-        Binding("c", "cancel_operation", "Cancel", show=False),
+        Binding("c", "cancel_operation", "Cancel"),
         Binding("d", "doctor", "Doctor"), Binding("w", "welcome", "Welcome", show=False),
         Binding("l", "logs", "Logs"), Binding("question_mark", "help", "Help"),
         Binding("enter", "primary", "Open", show=False),
@@ -956,6 +982,13 @@ class GoinfrePMApp(App[None]):
         if operation_nodes:
             operation_nodes[0].update(message)
 
+    def _update_main_progress(self, value: float) -> None:
+        """Update progress only while the main package screen still exists."""
+        main_screen = self._main_screen()
+        bars = list(main_screen.query("#progress")) if main_screen is not None else []
+        if bars:
+            bars[0].update(progress=max(0.0, min(100.0, value)))
+
     def _auto_setup_modal(self) -> AutoSetupPromptModal | AutoSetupProgressModal | None:
         for screen in reversed(self.screen_stack):
             if isinstance(screen, AutoSetupProgressModal):
@@ -1063,9 +1096,13 @@ class GoinfrePMApp(App[None]):
 
     def _set_active_pane(self, active: str | None) -> None:
         titles = {"categories": "CATEGORIES", "catalog": "PACKAGES", "details": "DETAILS"}
+        main_screen = self._main_screen()
+        if main_screen is None:
+            return
         for identifier, title in titles.items():
-            panel = self.query_one(f"#{identifier}", Vertical)
-            panel.border_title = f"{title}  •  ACTIVE" if identifier == active else title
+            panels = list(main_screen.query(f"#{identifier}"))
+            if panels:
+                panels[0].border_title = f"{title}  •  ACTIVE" if identifier == active else title
 
     def on_descendant_focus(self, event: DescendantFocus) -> None:
         if event.widget.id == "category-list":
@@ -1305,11 +1342,15 @@ class GoinfrePMApp(App[None]):
             if callable(action):
                 action()
             return
-        categories = self.query_one(OptionList)
+        category_nodes = list(self.query("#category-list"))
+        table_nodes = list(self.query("#package-table"))
+        if not category_nodes or not table_nodes:
+            return
+        categories = category_nodes[0]
         if categories.has_focus:
             categories.action_cursor_down()
         else:
-            self.query_one(DataTable).action_cursor_down()
+            table_nodes[0].action_cursor_down()
 
     def action_up(self) -> None:
         if isinstance(self.screen, ModalScreen):
@@ -1317,11 +1358,15 @@ class GoinfrePMApp(App[None]):
             if callable(action):
                 action()
             return
-        categories = self.query_one(OptionList)
+        category_nodes = list(self.query("#category-list"))
+        table_nodes = list(self.query("#package-table"))
+        if not category_nodes or not table_nodes:
+            return
+        categories = category_nodes[0]
         if categories.has_focus:
             categories.action_cursor_up()
         else:
-            self.query_one(DataTable).action_cursor_up()
+            table_nodes[0].action_cursor_up()
 
     def action_focus_packages(self) -> None:
         if isinstance(self.screen, ModalScreen):
@@ -1329,7 +1374,10 @@ class GoinfrePMApp(App[None]):
             if callable(focus_button):
                 focus_button(1)
             return
-        table = self.query_one(DataTable)
+        tables = list(self.query("#package-table"))
+        if not tables:
+            return
+        table = tables[0]
         if self.visible_packages:
             table.focus()
             self._set_active_pane("catalog")
@@ -1340,7 +1388,10 @@ class GoinfrePMApp(App[None]):
             if callable(focus_button):
                 focus_button(-1)
             return
-        categories = self.query_one(OptionList)
+        category_nodes = list(self.query("#category-list"))
+        if not category_nodes:
+            return
+        categories = category_nodes[0]
         if categories.display:
             categories.focus()
             self._set_active_pane("categories")
@@ -1349,11 +1400,15 @@ class GoinfrePMApp(App[None]):
         if not self.startup_finished:
             self._finish_startup()
             return
-        search = self.query_one("#search", Input)
+        searches = list(self.query("#search"))
+        tables = list(self.query("#package-table"))
+        if not searches or not tables:
+            return
+        search = searches[0]
         if search.has_class("visible"):
             search.remove_class("visible")
             self.action_focus_packages()
-        elif self.query_one(DataTable).has_focus:
+        elif tables[0].has_focus:
             self.action_focus_categories()
 
     def action_quit(self) -> None:
@@ -1389,21 +1444,23 @@ class GoinfrePMApp(App[None]):
         self.notify("Cancellation requested", severity="warning")
 
     def action_toggle(self) -> None:
-        table = self.query_one(DataTable)
+        tables = list(self.query("#package-table"))
+        if not tables:
+            return
+        table = tables[0]
         if not table.has_focus:
             return
         package = self._current()
-        if package and not self.busy:
+        if package:
             package.selected = not package.selected
             self._refresh(self.query_one("#search", Input).value, package.identifier)
 
     def action_select_all(self) -> None:
-        if not self.busy:
-            current = self._current()
-            target = not all(package.selected for package in self.visible_packages)
-            for package in self.visible_packages:
-                package.selected = target
-            self._refresh(preserve_identifier=current.identifier if current else None)
+        current = self._current()
+        target = not all(package.selected for package in self.visible_packages)
+        for package in self.visible_packages:
+            package.selected = target
+        self._refresh(preserve_identifier=current.identifier if current else None)
 
     def action_search(self) -> None:
         search = self.query_one("#search", Input)
@@ -1419,12 +1476,10 @@ class GoinfrePMApp(App[None]):
         self.push_screen(HelpModal())
 
     def action_welcome(self) -> None:
-        if not self.busy:
-            self.push_screen(WelcomeModal(self.layout.root))
+        self.push_screen(WelcomeModal(self.layout.root))
 
     def action_starter_packs(self) -> None:
-        if not self.busy:
-            self.push_screen(StarterPacksModal(self.packages), self._starter_pack_selected)
+        self.push_screen(StarterPacksModal(self.packages), self._starter_pack_selected)
 
     def _starter_pack_selected(self, pack: StarterPack | None) -> None:
         if pack is None:
@@ -1441,9 +1496,6 @@ class GoinfrePMApp(App[None]):
         self.notify(f"{pack.name}: added {len(identifiers)} packages to the basket")
 
     def action_basket(self) -> None:
-        if self.busy:
-            self.notify("Another operation is active", severity="warning")
-            return
         selected = [package for package in self.packages if package.selected]
         packages = [package for package in selected if not self.manager.installed(package.identifier)]
         if not packages:
@@ -1466,7 +1518,7 @@ class GoinfrePMApp(App[None]):
 
     def action_favorite(self) -> None:
         package = self._current()
-        if package is None or self.busy:
+        if package is None:
             return
         favorites = set(self.state.read().get("favorites", []))
         favorite = package.identifier not in favorites
@@ -1476,7 +1528,7 @@ class GoinfrePMApp(App[None]):
 
     def action_setup_toggle(self) -> None:
         package = self._current()
-        if package is None or self.busy:
+        if package is None:
             return
         setup = set(self.state.read().get("setup_packages", []))
         selected = package.identifier not in setup
@@ -1490,8 +1542,6 @@ class GoinfrePMApp(App[None]):
         self.notify(f"{package.name}: {'added to' if selected else 'removed from'} Auto Setup")
 
     def action_setup_selected(self) -> None:
-        if self.busy:
-            return
         packages = [
             package for package in self.packages
             if package.selected and package.enabled and package.compatible
@@ -1505,8 +1555,7 @@ class GoinfrePMApp(App[None]):
         self.notify(f"Added {len(packages)} package{'s' if len(packages) != 1 else ''} to Auto Setup")
 
     def action_sort(self) -> None:
-        if not self.busy:
-            self.push_screen(SortModal(), self._sort_changed)
+        self.push_screen(SortModal(), self._sort_changed)
 
     def _sort_changed(self, key: str | None) -> None:
         if key:
@@ -1653,6 +1702,7 @@ class GoinfrePMApp(App[None]):
                 package,
                 condition.status == "repairable",
                 package.desktop and condition.executable is not None,
+                not self._known_current(package),
             ),
             lambda action: self._installed_action(package, action),
         )
@@ -1668,7 +1718,25 @@ class GoinfrePMApp(App[None]):
                 self.query_one(RichLog).write(f"[red]Could not launch {package.name}: {message}[/red]")
                 self.notify(f"Could not launch {package.name}: {message}", severity="error")
         elif action in {"update", "reinstall", "repair"}:
+            if action == "update" and self._known_current(package):
+                self.notify(f"{package.name} is already up to date")
+                return
             self._run_packages([package], action)
+
+    def _known_current(self, package: Package) -> bool:
+        """Return true only when the installed/catalog versions can be compared safely."""
+        update = self.update_info.get(package.identifier)
+        if update is not None and update.status == "current":
+            return True
+        installed = self.manager.installations.read().get("installed", {})
+        record = installed.get(package.identifier, {}) if isinstance(installed, dict) else {}
+        installed_version = str(record.get("version", "")) if isinstance(record, dict) else ""
+        catalog_version = package.version.strip()
+        return (
+            bool(installed_version)
+            and catalog_version.casefold() not in {"", "latest", "unknown"}
+            and installed_version.strip().casefold().lstrip("v") == catalog_version.casefold().lstrip("v")
+        )
 
     def action_install_selected(self) -> None:
         self.action_basket()
@@ -1676,6 +1744,9 @@ class GoinfrePMApp(App[None]):
     def action_remove_one(self) -> None:
         package = self._current()
         if package and not self.busy:
+            if not self.manager.installed(package.identifier):
+                self.notify(f"{package.name} is not installed", severity="warning")
+                return
             if package.identifier in set(self.state.read().get("setup_packages", [])):
                 self.push_screen(
                     RemovalChoiceModal(1),
@@ -1712,12 +1783,26 @@ class GoinfrePMApp(App[None]):
             self._run_packages(packages, "remove", keep_setup=choice == "keep")
 
     def _run_packages(self, packages: list[Package], operation: str, keep_setup: bool = False) -> None:
+        requested = bool(packages)
         if operation == "install":
             packages = [package for package in packages if not self.manager.installed(package.identifier)]
+        elif operation == "remove":
+            packages = [package for package in packages if self.manager.installed(package.identifier)]
+        elif operation == "update":
+            packages = [
+                package for package in packages
+                if self.manager.installed(package.identifier)
+                and not self._known_current(package)
+            ]
         if self.busy:
             self.notify("Another operation is active", severity="warning")
         elif not packages:
-            self.notify("No packages selected", severity="warning")
+            message = {
+                "install": "Selected packages are already installed",
+                "remove": "Selected packages are already removed",
+                "update": "Selected packages are already up to date",
+            }.get(operation, "No packages selected") if requested else "No packages selected"
+            self.notify(message, severity="warning")
         else:
             self.busy = True
             self.cancel_event = threading.Event()
@@ -1736,8 +1821,8 @@ class GoinfrePMApp(App[None]):
                     skipped.append((package, "cancelled"))
                     continue
                 try:
-                    self.call_from_thread(self.query_one(ProgressBar).update, progress=0)
-                    self.call_from_thread(self.query_one("#operation", Static).update, f"{verbs[operation]} {package.name}")
+                    self.call_from_thread(self._update_main_progress, 0)
+                    self.call_from_thread(self._update_main_operation, f"{verbs[operation]} {package.name}")
                     if operation == "remove":
                         events = self.manager.remove(package.identifier, keep_setup=keep_setup)
                     elif operation == "repair":
@@ -1749,7 +1834,7 @@ class GoinfrePMApp(App[None]):
                             package.identifier,
                             cancel=self.cancel_event,
                             progress_callback=lambda value: self.call_from_thread(
-                                self.query_one(ProgressBar).update, progress=value
+                                self._update_main_progress, value
                             ),
                             transfer_callback=lambda done, total, speed, eta, item=package: self.call_from_thread(
                                 self._show_transfer, item, done, total, speed, eta
@@ -1757,21 +1842,24 @@ class GoinfrePMApp(App[None]):
                         )
                     for kind, value in events:
                         if kind == "log":
-                            self.call_from_thread(self.query_one(RichLog).write, str(value))
+                            self.call_from_thread(self._write_main_log, str(value))
                         elif kind == "progress":
-                            self.call_from_thread(self.query_one(ProgressBar).update, progress=float(value))
+                            self.call_from_thread(self._update_main_progress, float(value))
                     completed = {"install": "installed", "update": "updated", "reinstall": "reinstalled", "repair": "repaired", "remove": "removed"}[operation]
                     self.call_from_thread(self.notify, f"{package.name}: {completed}")
                     self.runtime_status.pop(package.identifier, None)
                     succeeded.append(package)
+                except DownloadCancelled:
+                    skipped.append((package, "cancelled safely"))
+                    self.call_from_thread(self.notify, f"{package.name}: cancelled safely", severity="warning")
                 except Exception as exc:
                     message = error_text(exc)
                     failed.append((package, message))
-                    self.call_from_thread(self.query_one(RichLog).write, f"[red]{package.name}: {message}[/red]")
+                    self.call_from_thread(self._write_main_log, f"[red]{package.name}: {message}[/red]")
                     self.call_from_thread(self.notify, f"{package.name}: {message}", severity="error")
         finally:
             self.busy = False
-            self.call_from_thread(self.query_one("#operation", Static).update, "Ready")
+            self.call_from_thread(self._update_main_operation, "Ready")
             self.call_from_thread(self._refresh)
             elapsed = time.monotonic() - started
             self.call_from_thread(self._show_summary, succeeded, failed, operation, elapsed, skipped)

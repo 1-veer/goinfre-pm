@@ -229,8 +229,8 @@ and state are not removed.
 | `Space` | Select or deselect (`☐` / `☑`; favorites show `★`) |
 | `/` | Search |
 | `Enter` | Open actions for an installed desktop application |
-| `i` / `I` | Install highlighted or open installed-app actions / review basket |
-| `r` / `R` | Confirm and remove highlighted / selected |
+| `i` / `Alt+I` | Install highlighted or open installed-app actions / review selected basket |
+| `r` / `Alt+R` | Confirm and remove highlighted / selected installed packages |
 | `a` | Select/deselect visible packages |
 | `p` | Choose and persist install root |
 | `t` | Open Starter Packs |
@@ -249,8 +249,10 @@ and state are not removed.
 | `q` | Exit; when post-local data exists, choose Clean & exit, Exit without cleaning, or Cancel |
 
 The layout hides lower-priority navigation/details panels at small terminal
-widths and remains usable around 80×24. Mutating actions are blocked while a
-worker is active, and quitting waits for the worker to finish. The focused
+widths and remains usable around 80×24. Conflicting install, removal, path, and
+cleanup actions are blocked while a worker is active, but navigation, package
+selection, favorites, and Auto Setup editing remain available. Quitting waits
+for the worker to finish. The focused
 category or package pane has a bright border and an `ACTIVE` title. Removal
 confirmations leave user configuration intact. Download operations show bytes,
 speed, and ETA when the server supplies a total; batch operations end with a
@@ -304,7 +306,8 @@ names and asks **Set up this post?** Choose **Install now** to continue or **Not
 now** to open GoinfrePM without changing application files. After confirmation,
 that same modal becomes the live installer: apps are handled sequentially with
 per-app state, progress, safe cancellation, and a final success/failure/skipped summary. Detailed logs
-also remain available in the task panel. Healthy payloads are
+also remain available in the task panel. Choose **Browse packages** to keep using
+the catalog while Auto Setup continues in the same process. Healthy payloads are
 never redownloaded or automatically updated; broken integration is repaired
 without downloading.
 

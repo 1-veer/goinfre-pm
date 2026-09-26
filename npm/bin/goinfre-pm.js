@@ -142,7 +142,8 @@ if (!fs.existsSync(installer)) {
 
 if (!installManager) {
   info("Run-only mode — no permanent command or shell changes.");
-  finish(run("sh", [installer, "run", ...args], { stdio: "inherit", env: process.env }), `run ${displayName}`);
+  const runEnvironment = Object.assign({}, process.env, { GPM_INVOKED_AS: `npx ${metadata.name}` });
+  finish(run("sh", [installer, "run", ...args], { stdio: "inherit", env: runEnvironment }), `run ${displayName}`);
   process.exit(0);
 }
 

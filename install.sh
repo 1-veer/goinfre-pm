@@ -144,34 +144,41 @@ import os
 from pathlib import Path
 import secrets
 import sys
+import time
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 url, destination_text, expected, user_agent = sys.argv[1:]
 destination = Path(destination_text)
-temporary = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}.tmp")
-digest = hashlib.sha256()
-total = 0
-try:
-    request = Request(url, headers={"User-Agent": user_agent})
-    with urlopen(request, timeout=30) as response, temporary.open("xb") as output:
-        if urlparse(response.geturl()).scheme != "https":
-            raise RuntimeError("pip bootstrap redirected away from HTTPS")
-        while True:
-            chunk = response.read(64 * 1024)
-            if not chunk:
-                break
-            total += len(chunk)
-            if total > 10 * 1024 * 1024:
-                raise RuntimeError("pip bootstrap exceeded the 10 MiB safety limit")
-            digest.update(chunk)
-            output.write(chunk)
-    if digest.hexdigest() != expected:
-        raise RuntimeError("pip bootstrap SHA-256 verification failed")
-    os.replace(temporary, destination)
-except Exception:
-    temporary.unlink(missing_ok=True)
-    raise
+last_error = None
+for attempt in range(1, 4):
+    temporary = destination.with_name(f".{destination.name}.{secrets.token_hex(8)}.tmp")
+    digest = hashlib.sha256()
+    total = 0
+    try:
+        request = Request(url, headers={"User-Agent": user_agent})
+        with urlopen(request, timeout=10) as response, temporary.open("xb") as output:
+            if urlparse(response.geturl()).scheme != "https":
+                raise RuntimeError("pip bootstrap redirected away from HTTPS")
+            while True:
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 10 * 1024 * 1024:
+                    raise RuntimeError("pip bootstrap exceeded the 10 MiB safety limit")
+                digest.update(chunk)
+                output.write(chunk)
+        if digest.hexdigest() != expected:
+            raise RuntimeError("pip bootstrap SHA-256 verification failed")
+        os.replace(temporary, destination)
+        break
+    except Exception as exc:
+        last_error = exc
+        temporary.unlink(missing_ok=True)
+        if attempt == 3:
+            raise
+        time.sleep(attempt)
 PY
     then
         activity_stop
@@ -258,6 +265,8 @@ esac
 # An npx launch never creates a permanent command or modifies shell startup
 # files. Its reusable private Python environment stays on this post's goinfre.
 if [ "$RUN_ONCE" = "1" ]; then
+    PIP_CACHE_DIR=$GPM_ROOT/downloads/pip-cache
+    mkdir -p "$PIP_CACHE_DIR"
     MANAGER_VENV=$GPM_ROOT/venv
     MANAGER_RUNTIME=$GPM_ROOT/runtime
     PIP_BOOTSTRAP_DIR=$MANAGER_RUNTIME/bootstrap
@@ -331,7 +340,7 @@ if [ "$RUN_ONCE" = "1" ]; then
         rm -f "$REQUIREMENTS_MARKER"
         activity_start "Installing the interface — still working, please wait"
         if "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-            --no-cache-dir --timeout 20 --retries 2 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
+            --cache-dir "$PIP_CACHE_DIR" --timeout 20 --retries 4 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
             activity_stop
         else
             activity_stop
@@ -359,7 +368,7 @@ fi
 info "Installing pinned dependencies and project files"
 log_note "Installing pinned dependencies and project files"
 if ! "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-    --no-cache-dir --timeout 20 --retries 2 --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1; then
+    --cache-dir "$GPM_ROOT/downloads/pip-cache" --timeout 20 --retries 4 --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1; then
     if "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
         warn "PyPI is unreachable; reusing dependencies and updating local project files only."
     else

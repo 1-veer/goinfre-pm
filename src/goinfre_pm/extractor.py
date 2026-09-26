@@ -8,6 +8,10 @@ import stat
 import subprocess  # nosec B404
 import tarfile
 import zipfile
+import threading
+import time
+
+from .downloader import DownloadCancelled
 
 
 class UnsafeArchiveError(RuntimeError):
@@ -44,12 +48,27 @@ def _top_level(names: list[str]) -> str:
     return next(iter(roots)) if len(roots) == 1 else ""
 
 
-def safe_extract_zip(archive: Path, destination: Path) -> None:
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise DownloadCancelled("Installation cancelled")
+
+
+def _copy_cancelled(source, output, cancel: threading.Event | None) -> None:
+    while True:
+        _check_cancel(cancel)
+        chunk = source.read(1024 * 1024)
+        if not chunk:
+            return
+        output.write(chunk)
+
+
+def safe_extract_zip(archive: Path, destination: Path, cancel: threading.Event | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive) as handle:
         infos = handle.infolist()
         strip = _top_level([item.filename for item in infos])
         for item in infos:
+            _check_cancel(cancel)
             relative = _safe_relative(item.filename, strip)
             if relative is None:
                 continue
@@ -64,18 +83,19 @@ def safe_extract_zip(archive: Path, destination: Path) -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with handle.open(item) as source, target.open("wb") as output:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
+                _copy_cancelled(source, output, cancel)
             if mode:
                 target.chmod(mode & 0o777)
 
 
-def safe_extract_tar(archive: Path, destination: Path) -> None:
+def safe_extract_tar(archive: Path, destination: Path, cancel: threading.Event | None = None) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with tarfile.open(archive) as handle:
         members = handle.getmembers()
         strip = _top_level([item.name for item in members])
         deferred_links: list[tuple[tarfile.TarInfo, Path]] = []
         for member in members:
+            _check_cancel(cancel)
             relative = _safe_relative(member.name, strip)
             if relative is None:
                 continue
@@ -93,13 +113,14 @@ def safe_extract_tar(archive: Path, destination: Path) -> None:
                 if source is None:
                     raise UnsafeArchiveError(f"Cannot read archive member: {member.name!r}")
                 with source, target.open("wb") as output:
-                    shutil.copyfileobj(source, output, length=1024 * 1024)
+                    _copy_cancelled(source, output, cancel)
                 target.chmod(member.mode & 0o777)
             elif member.issym() or member.islnk():
                 deferred_links.append((member, target))
             else:
                 raise UnsafeArchiveError(f"Unsupported archive member: {member.name!r}")
         for member, target in deferred_links:
+            _check_cancel(cancel)
             target.parent.mkdir(parents=True, exist_ok=True)
             link = PurePosixPath(member.linkname.replace("\\", "/"))
             if link.is_absolute():
@@ -123,45 +144,85 @@ def safe_extract_tar(archive: Path, destination: Path) -> None:
                 os.link(link_target, target)
 
 
-def extract_deb(archive: Path, destination: Path) -> None:
+def _run_cancellable(args: list[str], *, cancel: threading.Event | None, cwd: Path | None = None, stdout=None) -> None:
+    if cancel is None:
+        kwargs = {"check": True, "timeout": 180}
+        if cwd is not None:
+            kwargs["cwd"] = cwd
+        if stdout is not None:
+            kwargs["stdout"] = stdout
+        subprocess.run(args, **kwargs)
+        return
+    process = subprocess.Popen(args, cwd=cwd, stdout=stdout)  # nosec B603
+    started = time.monotonic()
+    try:
+        while process.poll() is None:
+            if cancel.wait(0.1):
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                raise DownloadCancelled("Installation cancelled")
+            if time.monotonic() - started > 180:
+                process.kill()
+                process.wait()
+                raise subprocess.TimeoutExpired(args, 180)
+        if process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, args)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+
+
+def extract_deb(archive: Path, destination: Path, cancel: threading.Event | None = None) -> None:
     dpkg_deb = shutil.which("dpkg-deb")
     if dpkg_deb is None:
         raise RuntimeError("dpkg-deb is required to extract .deb packages")
     # The executable comes from PATH and every dynamic value is one array item.
-    subprocess.run([dpkg_deb, "-x", str(archive), str(destination)], check=True, timeout=180)
+    _run_cancellable([dpkg_deb, "-x", str(archive), str(destination)], cancel=cancel)
 
 
-def extract_appimage(archive: Path, destination: Path, work: Path) -> None:
+def extract_appimage(archive: Path, destination: Path, work: Path, cancel: threading.Event | None = None) -> None:
     archive.chmod(archive.stat().st_mode | 0o111)
     # Executing the AppImage runtime is the format's extraction interface; no
     # shell is involved and the operation remains inside unique staging.
-    subprocess.run(
-        [str(archive), "--appimage-extract"], cwd=work, check=True, timeout=180, stdout=subprocess.DEVNULL
-    )
+    _run_cancellable([str(archive), "--appimage-extract"], cancel=cancel, cwd=work, stdout=subprocess.DEVNULL)
     root = work / "squashfs-root"
     if not root.is_dir():
         raise RuntimeError("AppImage did not produce squashfs-root")
     shutil.copytree(root, destination, dirs_exist_ok=True, symlinks=True)
 
 
-def extract_download(archive: Path, destination: Path, source_type: str, work: Path) -> None:
+def extract_download(
+    archive: Path,
+    destination: Path,
+    source_type: str,
+    work: Path,
+    cancel: threading.Event | None = None,
+) -> None:
     lower = archive.name.lower()
     if source_type == "deb" or lower.endswith(".deb"):
-        extract_deb(archive, destination)
+        extract_deb(archive, destination, cancel)
     elif source_type == "appimage" or lower.endswith(".appimage"):
         try:
-            extract_appimage(archive, destination, work)
+            extract_appimage(archive, destination, work, cancel)
+        except DownloadCancelled:
+            raise
         except (OSError, subprocess.SubprocessError, RuntimeError):
             destination.mkdir(parents=True, exist_ok=True)
             target = destination / "AppRun"
             shutil.copy2(archive, target)
             target.chmod(0o755)
     elif source_type == "zip" or lower.endswith(".zip"):
-        safe_extract_zip(archive, destination)
+        safe_extract_zip(archive, destination, cancel)
     elif source_type == "tar" or lower.endswith((".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar")):
-        safe_extract_tar(archive, destination)
+        safe_extract_tar(archive, destination, cancel)
     else:
         destination.mkdir(parents=True, exist_ok=True)
+        _check_cancel(cancel)
         target = destination / archive.name
         shutil.copy2(archive, target)
         target.chmod(target.stat().st_mode | 0o111)

@@ -2,12 +2,14 @@ from io import BytesIO
 from pathlib import Path
 import os
 import tarfile
+import threading
 import zipfile
 
 import pytest
 
 from goinfre_pm import extractor
 from goinfre_pm.extractor import UnsafeArchiveError, extract_download, safe_extract_tar, safe_extract_zip
+from goinfre_pm.downloader import DownloadCancelled
 
 
 def test_safe_zip_extraction_strips_single_root(tmp_path: Path) -> None:
@@ -18,6 +20,16 @@ def test_safe_zip_extraction_strips_single_root(tmp_path: Path) -> None:
     destination = tmp_path / "out"
     safe_extract_zip(archive, destination)
     assert (destination / "bin" / "run").read_bytes() == b"hello"
+
+
+def test_zip_extraction_honors_cancellation(tmp_path: Path) -> None:
+    archive = tmp_path / "safe.zip"
+    with zipfile.ZipFile(archive, "w") as handle:
+        handle.writestr("tool/bin/run", b"hello")
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(DownloadCancelled):
+        safe_extract_zip(archive, tmp_path / "out", cancelled)
 
 
 @pytest.mark.parametrize("name", ["../escape", "/absolute", "safe/../../escape", "..\\escape"])
