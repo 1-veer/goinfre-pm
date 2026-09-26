@@ -182,8 +182,8 @@ def test_onboarding_is_skippable_and_only_shown_once(monkeypatch, tmp_path) -> N
             assert isinstance(first.screen, app_module.WelcomeModal)
             welcome_copy = str(first.screen.query_one("#welcome-copy", Static).renderable)
             assert "Auto Setup" in welcome_copy
-            assert "offers to restore anything missing" in welcome_copy
-            assert "keeps your saved setup" in welcome_copy
+            assert "select the apps you usually use" in welcome_copy
+            assert "keeps your Auto Setup" in welcome_copy
             continue_button = first.screen.query_one("#continue", Button)
             assert continue_button.region.bottom <= first.screen.size.height
             await pilot.press("escape")
@@ -220,7 +220,7 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
             app._refresh()
             guide = app.query_one("#auto-setup-guide", Static)
             assert guide.display is True
-            assert "offers to restore anything missing" in str(guide.renderable)
+            assert "quickly install them together on a new post" in str(guide.renderable)
             assert [package.identifier for package in app.visible_packages] == [packages[0].identifier]
             assert "Not installed here" in str(app.query_one(DataTable).get_row(packages[0].identifier)[3])
             categories = app.query_one(OptionList)
@@ -233,7 +233,9 @@ def test_my_setup_keyboard_section_and_marker(monkeypatch, tmp_path) -> None:
             await pilot.click("#setup-toggle-button")
             await pilot.pause()
             assert state.read()["setup_packages"] == []
-            assert "GoinfrePM will offer to restore it" in str(app.query_one("#details-body", Static).renderable)
+            assert "quickly install your usual apps together" in str(
+                app.query_one("#details-body", Static).renderable
+            )
 
             app.category = "All"
             app._refresh()

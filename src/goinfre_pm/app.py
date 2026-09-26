@@ -231,9 +231,9 @@ class WelcomeModal(ModalScreen[None]):
                 f"Application payloads → [b]{self.root}[/b]\n"
                 "Launchers and small state → ~/.local and ~/.config\n"
                 "Existing application profiles and settings remain in their normal locations.\n\n"
-                "[b]Auto Setup[/b] — press m to save your usual apps. On another post, "
-                "GoinfrePM offers to restore anything missing. Clean & leave removes the large files "
-                "but keeps your saved setup.\n\n"
+                "[b]Auto Setup[/b] — select the apps you usually use so you can quickly install them "
+                "together whenever you move to a new post. Press m to add an app. Clean & leave "
+                "removes the large files but keeps your Auto Setup.\n\n"
                 "Use ↑/↓ to browse, → to enter the package list, Space to select, "
                 "^P to choose a theme, t for Starter Packs, "
                 "and b to review your basket.\n\nMade by VEER"
@@ -784,8 +784,8 @@ class GoinfrePMApp(App[None]):
                 yield Static("Made by VEER", id="creator")
             with Vertical(id="catalog", classes="panel"):
                 yield Static(
-                    "Saved apps • On another post, GoinfrePM offers to restore anything missing. "
-                    "Press m to add or remove.",
+                    "Select the apps you usually use so you can quickly install them together on a new post. "
+                    "Press m to add or remove apps.",
                     id="auto-setup-guide",
                 )
                 yield DataTable(id="package-table", cursor_type="row", zebra_stripes=True)
@@ -1220,8 +1220,8 @@ class GoinfrePMApp(App[None]):
                 message = "No favorites yet. Highlight a package and press f to keep it here."
             elif self.category == "Auto Setup":
                 message = (
-                    "Auto Setup is empty. Press m on any app to save it here; GoinfrePM will offer "
-                    "to restore it when you change posts."
+                    "Auto Setup is empty. Press m on any app to add it, then quickly install your usual "
+                    "apps together whenever you move to a new post."
                 )
             elif self.category == "Installed":
                 message = "Nothing is installed yet. Choose All or a Starter Pack to begin."
