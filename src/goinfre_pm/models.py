@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 PACKAGE_ID = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$")
+CURRENT_INTEGRATION_VERSION = 2
 
 
 def validate_package_id(value: str) -> str:
@@ -96,6 +97,7 @@ class InstalledPackage:
     installed_at: str = ""
     download_size: int | None = None
     installed_size: int | None = None
+    integration_version: int = CURRENT_INTEGRATION_VERSION
 
     @classmethod
     def from_dict(cls, identifier: str, data: dict[str, Any]) -> "InstalledPackage":
@@ -109,4 +111,9 @@ class InstalledPackage:
             installed_at=str(data.get("installed_at", "")),
             download_size=int(data["download_size"]) if isinstance(data.get("download_size"), int) else None,
             installed_size=int(data["installed_size"]) if isinstance(data.get("installed_size"), int) else None,
+            integration_version=(
+                int(data["integration_version"])
+                if isinstance(data.get("integration_version"), int)
+                else 0
+            ),
         )

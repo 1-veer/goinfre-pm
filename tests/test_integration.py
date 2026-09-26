@@ -3,7 +3,14 @@ import os
 
 import pytest
 
-from goinfre_pm.integration import desktop_entry, find_executable, integrate, remove_integration, validate_user_data_path
+from goinfre_pm.integration import (
+    desktop_entry,
+    find_executable,
+    find_icon,
+    integrate,
+    remove_integration,
+    validate_user_data_path,
+)
 from goinfre_pm.models import Package
 
 
@@ -57,6 +64,43 @@ def test_zen_archive_layout_selects_browser_not_helper(tmp_path: Path) -> None:
         executable_candidates=("zen/zen", "zen", "zen-bin"),
     )
     assert find_executable(tmp_path, zen) == browser
+
+
+def test_configured_icon_handles_archive_wrapper_directory(tmp_path: Path) -> None:
+    expected = tmp_path / "Postman" / "app" / "resources" / "app" / "assets" / "icon.png"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"configured")
+    unrelated = tmp_path / "Postman" / "app" / "resources" / "large-background.png"
+    unrelated.write_bytes(b"x" * 10_000)
+
+    postman = package(icon_candidates=("app/resources/app/assets/icon.png",))
+
+    assert find_icon(tmp_path, postman) == expected
+
+
+def test_icon_discovery_uses_matching_desktop_metadata(tmp_path: Path) -> None:
+    desktop = tmp_path / "usr" / "share" / "applications" / "sample-tool.desktop"
+    desktop.parent.mkdir(parents=True)
+    desktop.write_text(
+        "[Desktop Entry]\nName=Sample Tool\nExec=/usr/bin/sample\nIcon=sample-tool\n",
+        encoding="utf-8",
+    )
+    expected = tmp_path / "usr" / "share" / "icons" / "hicolor" / "256x256" / "apps" / "sample-tool.png"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"logo")
+    unrelated = tmp_path / "resources" / "welcome-background.png"
+    unrelated.parent.mkdir()
+    unrelated.write_bytes(b"x" * 10_000)
+
+    assert find_icon(tmp_path, package()) == expected
+
+
+def test_icon_discovery_rejects_unrelated_large_artwork(tmp_path: Path) -> None:
+    artwork = tmp_path / "resources" / "welcome-background.png"
+    artwork.parent.mkdir()
+    artwork.write_bytes(b"x" * 10_000)
+
+    assert find_icon(tmp_path, package()) is None
 
 
 def test_desktop_entry_quotes_paths_with_spaces(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ USER_BIN = Path.home() / ".local" / "bin"
 DESKTOP_DIR = Path.home() / ".local" / "share" / "applications"
 ICON_DIR = Path.home() / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
 AUTOSTART_DIR = Path.home() / ".config" / "autostart"
+ICON_SUFFIXES = {".png", ".svg", ".xpm"}
 
 
 def _within(base: Path, candidate: Path) -> bool:
@@ -61,13 +62,126 @@ def find_executable(package_dir: Path, package: Package) -> Path | None:
     return max(candidates, key=lambda item: item[0])[1] if candidates else None
 
 
+def _normalise_icon_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", value.casefold())
+
+
+def _configured_icon(package_dir: Path, relative: str) -> Path | None:
+    """Resolve a configured icon even when an archive adds a wrapper directory."""
+    candidate = package_dir / relative
+    if (
+        _within(package_dir, candidate)
+        and candidate.is_file()
+        and candidate.suffix.lower() in ICON_SUFFIXES
+    ):
+        return candidate
+    wanted = Path(relative).parts
+    matches: list[Path] = []
+    for nested in package_dir.rglob(Path(relative).name):
+        if (
+            not nested.is_file()
+            or not _within(package_dir, nested)
+            or nested.suffix.lower() not in ICON_SUFFIXES
+        ):
+            continue
+        actual = nested.relative_to(package_dir).parts
+        if len(actual) >= len(wanted) and actual[-len(wanted):] == wanted:
+            matches.append(nested)
+    return min(matches, key=lambda item: len(item.relative_to(package_dir).parts), default=None)
+
+
+def _desktop_icon_names(package_dir: Path, package: Package) -> set[str]:
+    """Read icon names only from desktop entries that clearly belong to the package."""
+    aliases = {
+        _normalise_icon_name(package.identifier),
+        _normalise_icon_name(package.name),
+        *(
+            _normalise_icon_name(Path(candidate).name)
+            for candidate in package.executable_candidates
+        ),
+    }
+    aliases.difference_update({"", "app", "apprun", "bin", "run", "start"})
+    icons: set[str] = set()
+    for entry in package_dir.rglob("*.desktop"):
+        if not entry.is_file() or not _within(package_dir, entry):
+            continue
+        try:
+            fields: dict[str, str] = {}
+            in_desktop_entry = False
+            for raw_line in entry.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = raw_line.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    if in_desktop_entry:
+                        break
+                    in_desktop_entry = line == "[Desktop Entry]"
+                    continue
+                if in_desktop_entry and "=" in line and not line.startswith("#"):
+                    key, value = line.split("=", 1)
+                    fields.setdefault(key, value.strip())
+        except OSError:
+            continue
+        identity = _normalise_icon_name(
+            f"{entry.stem} {fields.get('Name', '')} {fields.get('Exec', '')}"
+        )
+        icon = fields.get("Icon", "").strip()
+        if icon and any(alias in identity for alias in aliases):
+            icons.add(icon)
+    return icons
+
+
+def _icon_score(image: Path, package_dir: Path, aliases: set[str], desktop_icons: set[str]) -> int:
+    relative = image.relative_to(package_dir)
+    path_text = "/".join(relative.parts).casefold()
+    stem = _normalise_icon_name(image.stem)
+    desktop_names = {
+        _normalise_icon_name(Path(value).stem if Path(value).suffix else value)
+        for value in desktop_icons
+    }
+    score = 0
+    if stem and stem in desktop_names:
+        score += 200
+    if any(alias == stem for alias in aliases):
+        score += 100
+    elif stem and any(len(alias) >= 3 and (alias in stem or stem in alias) for alias in aliases):
+        score += 55
+    if "/apps/" in f"/{path_text}/":
+        score += 25
+    if "hicolor" in relative.parts or "pixmaps" in relative.parts:
+        score += 15
+    if "scalable" in relative.parts or re.search(r"(?:^|/)(128|256|512|1024)x\1(?:/|$)", path_text):
+        score += 10
+    if any(word in path_text for word in ("symbolic", "tray", "status", "notification", "badge")):
+        score -= 120
+    return score
+
+
 def find_icon(package_dir: Path, package: Package) -> Path | None:
+    """Find a trustworthy application logo without selecting arbitrary bundled artwork."""
     for relative in package.icon_candidates:
-        candidate = package_dir / relative
-        if _within(package_dir, candidate) and candidate.is_file() and candidate.suffix.lower() in {".png", ".svg"}:
-            return candidate
-    images = [item for item in package_dir.rglob("*") if item.is_file() and item.suffix.lower() in {".png", ".svg"}]
-    return max(images, key=lambda item: item.stat().st_size, default=None)
+        configured = _configured_icon(package_dir, relative)
+        if configured is not None:
+            return configured
+
+    images = [
+        item
+        for item in package_dir.rglob("*")
+        if item.is_file() and _within(package_dir, item) and item.suffix.lower() in ICON_SUFFIXES
+    ]
+    if not images:
+        return None
+    desktop_icons = _desktop_icon_names(package_dir, package)
+    aliases = {
+        _normalise_icon_name(package.identifier),
+        _normalise_icon_name(package.name),
+        *(
+            _normalise_icon_name(Path(candidate).name)
+            for candidate in package.executable_candidates
+        ),
+    }
+    aliases.difference_update({"", "app", "apprun", "bin", "run", "start"})
+    ranked = [(_icon_score(image, package_dir, aliases, desktop_icons), image) for image in images]
+    score, selected = max(ranked, key=lambda item: (item[0], item[1].stat().st_size))
+    return selected if score >= 50 else None
 
 
 def _desktop_exec(path: Path) -> str:
@@ -118,6 +232,10 @@ def integrate(package: Package, executable: Path, package_dir: Path | None = Non
     if package.desktop:
         icon_source = find_icon(package_dir or executable.parent, package)
         icon_target: Path | None = None
+        for suffix in ICON_SUFFIXES:
+            stale_icon = _owned_path(ICON_DIR, package.identifier, suffix)
+            if stale_icon.is_file() or stale_icon.is_symlink():
+                stale_icon.unlink()
         if icon_source:
             ICON_DIR.mkdir(parents=True, exist_ok=True)
             icon_target = _owned_path(ICON_DIR, package.identifier, icon_source.suffix.lower())
@@ -148,6 +266,7 @@ def remove_integration_by_identifier(identifier: str) -> list[str]:
         _owned_path(DESKTOP_DIR, identifier, ".desktop"),
         _owned_path(ICON_DIR, identifier, ".png"),
         _owned_path(ICON_DIR, identifier, ".svg"),
+        _owned_path(ICON_DIR, identifier, ".xpm"),
     ]
     removed: list[str] = []
     for path in known:

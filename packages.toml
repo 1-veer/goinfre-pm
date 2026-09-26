@@ -10,6 +10,7 @@ url = "https://github.com/zen-browser/desktop/releases/latest/download/zen.linux
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["zen/zen", "zen", "zen-bin"]
+icons = ["browser/chrome/icons/default/default128.png"]
 version = "latest"
 notes = "Uses the official latest x86_64 archive and preserves the existing ~/.zen profile."
 
@@ -22,6 +23,7 @@ url = "https://download.mozilla.org/?product=firefox-latest&os=linux64&lang=en-U
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["firefox", "firefox-bin"]
+icons = ["browser/chrome/icons/default/default128.png"]
 
 [[package]]
 id = "brave-browser"
@@ -43,6 +45,7 @@ url = "https://dist.torproject.org/torbrowser/15.0.23/tor-browser-linux-x86_64-1
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["Browser/start-tor-browser", "Browser/firefox.real"]
+icons = ["Browser/browser/chrome/icons/default/default128.png", "browser/chrome/icons/default/default128.png"]
 version = "15.0.23"
 notes = "Pinned official distribution URL; update the catalog when Tor retires this release."
 
@@ -136,6 +139,7 @@ url = "https://zed.dev/api/releases/stable/latest/zed-linux-x86_64.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/zed", "zed"]
+icons = ["share/icons/hicolor/512x512/apps/zed.png", "share/icons/hicolor/scalable/apps/zed.svg"]
 
 [[package]]
 id = "pycharm"
@@ -146,6 +150,7 @@ url = "https://download.jetbrains.com/python/pycharm-professional-2024.3.1.1.tar
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/pycharm.sh"]
+icons = ["bin/pycharm.svg", "bin/pycharm.png"]
 version = "2024.3.1.1"
 notes = "Corrected from an incompatible ARM archive; pinned and should be refreshed."
 
@@ -158,6 +163,7 @@ url = "https://download.jetbrains.com/cpp/CLion-2024.3.2.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/clion"]
+icons = ["bin/clion.svg", "bin/clion.png"]
 version = "2024.3.2"
 notes = "Pinned vendor URL."
 
@@ -170,6 +176,7 @@ url = "https://download.jetbrains.com/idea/ideaIU-2024.3.2.1.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/idea"]
+icons = ["bin/idea.svg", "bin/idea.png"]
 version = "2024.3.2.1"
 notes = "Pinned vendor URL."
 
@@ -182,6 +189,7 @@ url = "https://download.jetbrains.com/webide/PhpStorm-2024.3.2.1.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/phpstorm"]
+icons = ["bin/phpstorm.svg", "bin/phpstorm.png"]
 version = "2024.3.2.1"
 notes = "Pinned vendor URL."
 
@@ -194,6 +202,7 @@ url = "https://download.jetbrains.com/webstorm/WebStorm-2024.3.2.1.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/webstorm"]
+icons = ["bin/webstorm.svg", "bin/webstorm.png"]
 version = "2024.3.2.1"
 notes = "Pinned vendor URL."
 
@@ -206,6 +215,7 @@ url = "https://download.jetbrains.com/rider/JetBrains.Rider-2024.3.4.tar.gz"
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/rider"]
+icons = ["bin/rider.svg", "bin/rider.png"]
 version = "2024.3.4"
 notes = "Pinned vendor URL."
 
@@ -218,6 +228,7 @@ url = "https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2024.2.2.13/an
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["bin/studio"]
+icons = ["bin/studio.svg", "bin/studio.png"]
 version = "2024.2.2.13"
 notes = "Tracking parameters and temporary mirror host were removed; pinned canonical redirect remains."
 
@@ -456,6 +467,7 @@ url = "https://download.mozilla.org/?product=thunderbird-latest&os=linux64&lang=
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["thunderbird"]
+icons = ["chrome/icons/default/default128.png"]
 
 [[package]]
 id = "qbittorrent"
@@ -509,6 +521,7 @@ url = "https://download.blender.org/release/Blender4.3/blender-4.3.2-linux-x64.t
 source_type = "tar"
 architectures = ["x86_64"]
 executables = ["blender", "blender-launcher"]
+icons = ["blender.svg", "blender.png"]
 version = "4.3.2"
 notes = "Pinned official distribution URL; review the release version before broad deployment."
 

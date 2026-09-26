@@ -334,6 +334,7 @@ class LocalStateStore:
             "installed_at": record.installed_at,
             "download_size": record.download_size,
             "installed_size": record.installed_size,
+            "integration_version": record.integration_version,
         }
 
     def set_installed(self, record: InstalledPackage) -> None:

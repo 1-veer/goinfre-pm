@@ -25,7 +25,7 @@ from .integration import (
     remove_integration_by_identifier,
     validate_user_data_path,
 )
-from .models import InstalledPackage, Package, validate_package_id
+from .models import CURRENT_INTEGRATION_VERSION, InstalledPackage, Package, validate_package_id
 from .storage import Layout, LocalStateStore, StateStore, available_space, verify_install_root
 
 Event = tuple[str, object]
@@ -421,7 +421,11 @@ class PackageManager:
         except OSError:
             command_ok = False
         desktop_ok = self._desktop_launcher_ok(package, executable)
-        if not same_executable or not command_ok or not desktop_ok:
+        integration_current = (
+            not package.desktop
+            or record.get("integration_version") == CURRENT_INTEGRATION_VERSION
+        )
+        if not same_executable or not command_ok or not desktop_ok or not integration_current:
             return InstallationCheck("repairable", executable, "launcher or local installation metadata needs repair")
         return InstallationCheck("installed", executable)
 

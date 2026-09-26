@@ -4,7 +4,7 @@ import pytest
 
 from goinfre_pm import integration
 from goinfre_pm.installer import OperationLock, PackageManager
-from goinfre_pm.models import InstalledPackage, Package
+from goinfre_pm.models import CURRENT_INTEGRATION_VERSION, InstalledPackage, Package
 from goinfre_pm.storage import Layout, StateStore
 
 
@@ -78,6 +78,52 @@ def test_install_rejects_a_repairable_payload_with_actionable_choices(tmp_path: 
 
     with pytest.raises(RuntimeError, match="needs repair.*repair.*update.*reinstall"):
         next(manager.install("tool"))
+
+
+def test_legacy_desktop_integration_is_repaired_once(monkeypatch, tmp_path: Path) -> None:
+    package = Package(
+        identifier="tool",
+        name="Tool",
+        description="Fixture",
+        category="Developer Tools",
+        url="https://example.invalid/tool.tar.xz",
+        source_type="tar",
+        architectures=("any",),
+        executable_candidates=("bin/tool",),
+        icon_candidates=("share/icons/tool.png",),
+    )
+    layout = Layout.at(tmp_path / "goinfre-pm")
+    executable = layout.apps / "tool" / "bin" / "tool"
+    executable.parent.mkdir(parents=True)
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    icon = layout.apps / "tool" / "share" / "icons" / "tool.png"
+    icon.parent.mkdir(parents=True)
+    icon.write_bytes(b"icon")
+    monkeypatch.setattr(integration, "USER_BIN", tmp_path / "bin")
+    monkeypatch.setattr(integration, "DESKTOP_DIR", tmp_path / "applications")
+    monkeypatch.setattr(integration, "ICON_DIR", tmp_path / "icons")
+    launchers = integration.integrate(package, executable, layout.apps / "tool")
+    manager = PackageManager(layout, [package], StateStore(tmp_path / "state.json"))
+    manager.installations.write(
+        {
+            "installed": {
+                "tool": {
+                    "version": "1",
+                    "source": package.url,
+                    "executable": str(executable),
+                    "launchers": launchers,
+                }
+            }
+        }
+    )
+
+    assert manager.installation("tool").status == "repairable"
+    manager.repair("tool")
+
+    record = manager.installations.read()["installed"]["tool"]
+    assert record["integration_version"] == CURRENT_INTEGRATION_VERSION
+    assert manager.installation("tool").status == "installed"
 
 
 def test_launch_uses_verified_executable_without_a_shell(monkeypatch, tmp_path: Path) -> None:
