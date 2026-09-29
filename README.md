@@ -504,10 +504,11 @@ are deliberately retained for safety and possible reinstall.
 
 - Downloads require HTTPS with normal certificate validation, timeouts, and
   operation-specific temporary directories.
-- Large official GitHub release assets use at most four verified byte-range
-  connections to avoid a single throttled campus route. The final host must be
-  GitHub's own release-assets domain, every returned range is validated, and
-  unsupported servers automatically fall back to one resumable connection.
+- Downloads use one connection at a time. For large GitHub release assets, a
+  connection that remains unusually slow is replaced automatically while the
+  bytes already received are preserved with a validated resume request. Fast
+  connections are never interrupted, and the last attempt is allowed to finish
+  at any speed rather than looping forever.
 - Tar and ZIP extraction rejects absolute paths, traversal, special devices,
   unsafe links, and ZIP symlinks.
 - Installs are staged and atomically swapped; failed updates restore the prior
@@ -547,9 +548,10 @@ commands, PATH, state, integrations, catalog validity, and architecture.
 - **A previous install says `No module named pip`:** run
   `npx --yes goinfre-pm@latest` again. Version 1.2.1 and newer detects and
   repairs the incomplete environment without sudo.
-- **GitHub-hosted applications download slowly:** version 1.5.20 and newer
-  combines up to four safe range connections for large official GitHub release
-  assets. Other vendor CDNs and small files continue to use one connection.
+- **GitHub-hosted applications download slowly:** version 1.5.21 and newer
+  keeps fast downloads untouched. If a large GitHub release remains slow, it
+  reconnects to seek a healthier CDN route without discarding bytes already
+  received. Other vendor CDNs and small files retain the existing behavior.
 - **Application does not launch:** inspect `<root>/logs/<package>.log`, run
   `gpm doctor`, then `gpm repair`.
 - **An app was installed on another post:** add it to Auto Setup once with `m` or

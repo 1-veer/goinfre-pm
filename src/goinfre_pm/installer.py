@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ from .models import CURRENT_INTEGRATION_VERSION, InstalledPackage, Package, vali
 from .storage import Layout, LocalStateStore, StateStore, available_space, verify_install_root
 
 Event = tuple[str, object]
+TRANSFER_RATE_WINDOW_SECONDS = 4.0
 
 
 @dataclass(frozen=True)
@@ -702,28 +704,26 @@ class PackageManager:
             promoted = False
             download_started = time.monotonic()
             last_transfer_emit = 0.0
-            last_transfer_time = download_started
-            last_transfer_done = 0
-            smoothed_speed = 0.0
+            transfer_samples: deque[tuple[float, int]] = deque([(download_started, 0)])
             try:
                 yield ("log", f"Downloading {package.name}")
 
                 def on_progress(done: int, total: int | None) -> None:
                     nonlocal download_started, last_transfer_emit
-                    nonlocal last_transfer_time, last_transfer_done, smoothed_speed
+                    nonlocal transfer_samples
                     if done == 0:
                         download_started = time.monotonic()
                         last_transfer_emit = 0.0
-                        last_transfer_time = download_started
-                        last_transfer_done = 0
-                        smoothed_speed = 0.0
+                        transfer_samples = deque([(download_started, 0)])
                         return
                     now = time.monotonic()
-                    elapsed = max(now - last_transfer_time, 0.001)
-                    delta = max(0, done - last_transfer_done)
-                    current_speed = delta / elapsed
-                    smoothed_speed = current_speed if smoothed_speed <= 0 else (smoothed_speed * 0.7 + current_speed * 0.3)
-                    speed = smoothed_speed
+                    transfer_samples.append((now, done))
+                    cutoff = now - TRANSFER_RATE_WINDOW_SECONDS
+                    while len(transfer_samples) > 2 and transfer_samples[1][0] <= cutoff:
+                        transfer_samples.popleft()
+                    baseline_time, baseline_done = transfer_samples[0]
+                    elapsed = max(now - baseline_time, 0.001)
+                    speed = max(0, done - baseline_done) / elapsed
                     eta = (total - done) / speed if total is not None and speed > 0 else None
                     if now - last_transfer_emit >= 0.5 or (total is not None and done == total):
                         log(f"download {done}/{total or '?'} bytes")
@@ -732,8 +732,6 @@ class PackageManager:
                         elif total and progress_callback:
                             progress_callback(min(40.0, done / total * 40.0))
                         last_transfer_emit = now
-                    last_transfer_time = now
-                    last_transfer_done = done
 
                 archive, version = download(package, operation, on_progress, log, cancel)
                 if cancel is not None and cancel.is_set():
