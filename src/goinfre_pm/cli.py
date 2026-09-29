@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import os
 from pathlib import Path
 import sys
@@ -193,13 +194,19 @@ def _print_packages(query: str = "") -> None:
         print(f"{package.identifier:20} {status:10} {package.category:18} {package.name}{compatible}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    _startup_ready: Callable[[], None] | None = None,
+) -> int:
     invocation = _invocation()
     args = build_parser().parse_args(argv)
+    startup_ready = _startup_ready or (lambda: None)
     try:
         if args.command is None:
             root = resolve_install_root()
             if root is None:
+                startup_ready()
                 if not sys.stdin.isatty():
                     raise RuntimeError(f"No goinfre root found; run `{invocation} path set DIRECTORY` first")
                 chosen = Path(input("Writable goinfre directory: ").strip()).expanduser().resolve()
@@ -208,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
                 persist_root(chosen)
             retired_autostart = retire_background_autostart()
             from .app import run_tui
+            startup_ready()
             run_tui(auto_restore=not args.no_restore, retired_autostart=retired_autostart)
         elif args.command == "list":
             _print_packages()
@@ -325,12 +333,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{DISPLAY_NAME} {VERSION}")
         return 0
     except (ConfigurationError, OSError, RuntimeError, ValueError) as exc:
+        startup_ready()
         print(f"{invocation}: error: {error_text(exc)}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
+        startup_ready()
         print(f"\n{invocation}: cancelled", file=sys.stderr)
         return 130
     except Exception as exc:
+        startup_ready()
         crash_log = write_crash_log(exc)
         print(f"{invocation}: unexpected error: {error_text(exc)}", file=sys.stderr)
         if crash_log:

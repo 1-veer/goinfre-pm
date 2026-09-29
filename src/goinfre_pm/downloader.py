@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from concurrent.futures import FIRST_EXCEPTION, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 import http.client
 import json
@@ -25,10 +26,19 @@ MAX_DOWNLOAD_ATTEMPTS = 5
 SLOW_CONNECTION_WINDOW_SECONDS = 8
 MIN_USEFUL_DOWNLOAD_RATE = 384 * 1024
 LARGE_DOWNLOAD_REMAINDER = 16 * 1024 * 1024
+PARALLEL_DOWNLOAD_THRESHOLD = 32 * 1024 * 1024
+PARALLEL_DOWNLOAD_WORKERS = 4
+PARALLEL_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+RANGE_DOWNLOAD_ATTEMPTS = 6
+MIN_RANGE_DOWNLOAD_RATE = 128 * 1024
 
 
 class DownloadCancelled(RuntimeError):
     pass
+
+
+class _ParallelDownloadUnavailable(RuntimeError):
+    """The origin does not safely support a segmented range download."""
 
 
 def _request(
@@ -143,6 +153,183 @@ def resolve_github_release(package: Package, log: Log) -> tuple[str, str]:
     return url, version
 
 
+def _response_status(response: urllib.response.addinfourl) -> int:
+    status = getattr(response, "status", None)
+    if status is None:
+        getcode = getattr(response, "getcode", None)
+        status = getcode() if callable(getcode) else 200
+    return int(status or 200)
+
+
+def _is_github_release_url(url: str) -> bool:
+    parsed = urllib.parse.urlparse(url)
+    return parsed.hostname == "github.com" and "/releases/" in parsed.path and "/download/" in parsed.path
+
+
+def _range_from_headers(response: urllib.response.addinfourl) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", response.headers.get("Content-Range", ""))
+    if not match:
+        return None
+    start, end, total = (int(value) for value in match.groups())
+    return start, end, total
+
+
+def _parallel_github_download(
+    url: str,
+    destination: Path,
+    progress: Progress,
+    log: Log,
+    cancel: threading.Event | None,
+) -> tuple[Path, int]:
+    """Download an official GitHub release asset using bounded byte ranges."""
+    if cancel and cancel.is_set():
+        raise DownloadCancelled("Download cancelled")
+    with _request(url, CONNECT_TIMEOUT_SECONDS, {"Range": "bytes=0-0"}) as probe:
+        byte_range = _range_from_headers(probe)
+        if _response_status(probe) != 206 or byte_range is None or byte_range[:2] != (0, 0):
+            raise _ParallelDownloadUnavailable("GitHub asset did not accept a byte-range probe")
+        total = byte_range[2]
+        if total < PARALLEL_DOWNLOAD_THRESHOLD:
+            raise _ParallelDownloadUnavailable("Asset is too small to benefit from a segmented download")
+        final_url = probe.geturl()
+        final_host = urllib.parse.urlparse(final_url).hostname or ""
+        if not final_host.endswith(".githubusercontent.com"):
+            raise _ParallelDownloadUnavailable("GitHub redirected the asset to an unexpected host")
+        filename = _response_name(probe, url)
+        if len(probe.read(2)) != 1:
+            raise _ParallelDownloadUnavailable("GitHub returned an invalid byte-range probe")
+
+    output = destination / filename
+    output.unlink(missing_ok=True)
+    with output.open("xb") as handle:
+        handle.truncate(total)
+
+    ranges: list[tuple[int, int]] = []
+    start = 0
+    while start < total:
+        end = min(start + PARALLEL_DOWNLOAD_CHUNK_SIZE, total) - 1
+        ranges.append((start, end))
+        start = end + 1
+    workers = min(PARALLEL_DOWNLOAD_WORKERS, len(ranges))
+
+    state_lock = threading.Lock()
+    stop = threading.Event()
+    received = 0
+
+    def fetch_range(range_start: int, range_end: int) -> None:
+        nonlocal received
+        position = range_start
+        last_error: BaseException | None = None
+        for attempt in range(1, RANGE_DOWNLOAD_ATTEMPTS + 1):
+            if stop.is_set() or (cancel and cancel.is_set()):
+                raise DownloadCancelled("Download cancelled")
+            try:
+                headers = {"Range": f"bytes={position}-{range_end}"}
+                with _request(final_url, CONNECT_TIMEOUT_SECONDS, headers) as response:
+                    actual_range = _range_from_headers(response)
+                    expected_range = (position, range_end, total)
+                    if _response_status(response) != 206 or actual_range != expected_range:
+                        raise RuntimeError("GitHub returned an unexpected byte range")
+                    window_started = time.monotonic()
+                    window_bytes = 0
+                    with output.open("r+b", buffering=0) as handle:
+                        handle.seek(position)
+                        while position <= range_end:
+                            if stop.is_set() or (cancel and cancel.is_set()):
+                                raise DownloadCancelled("Download cancelled")
+                            remaining = range_end - position + 1
+                            chunk = response.read(min(256 * 1024, remaining))
+                            if not chunk:
+                                raise http.client.IncompleteRead(b"", remaining)
+                            if len(chunk) > remaining:
+                                raise RuntimeError("GitHub returned data outside the requested byte range")
+                            handle.write(chunk)
+                            position += len(chunk)
+                            window_bytes += len(chunk)
+                            with state_lock:
+                                received += len(chunk)
+                            now = time.monotonic()
+                            window_elapsed = now - window_started
+                            if (
+                                attempt < RANGE_DOWNLOAD_ATTEMPTS
+                                and window_elapsed >= SLOW_CONNECTION_WINDOW_SECONDS
+                                and window_bytes / window_elapsed < MIN_RANGE_DOWNLOAD_RATE
+                            ):
+                                rate_kib = window_bytes / window_elapsed / 1024
+                                raise TimeoutError(
+                                    f"range connection averaged only {rate_kib:.0f} KiB/s for "
+                                    f"{SLOW_CONNECTION_WINDOW_SECONDS} seconds"
+                                )
+                            if window_elapsed >= SLOW_CONNECTION_WINDOW_SECONDS:
+                                window_started, window_bytes = now, 0
+                return
+            except DownloadCancelled:
+                raise
+            except (OSError, RuntimeError, TimeoutError, http.client.HTTPException, socket.timeout) as exc:
+                last_error = exc
+                if attempt == RANGE_DOWNLOAD_ATTEMPTS:
+                    raise RuntimeError(
+                        f"GitHub range {range_start}-{range_end} failed after "
+                        f"{RANGE_DOWNLOAD_ATTEMPTS} attempts: {exc}"
+                    ) from exc
+                retry_delay = min(attempt * 0.5, 2.0)
+                if stop.wait(retry_delay) or (cancel and cancel.is_set()):
+                    raise DownloadCancelled("Download cancelled") from exc
+        raise RuntimeError(f"GitHub range download failed: {last_error or 'unknown error'}")
+
+    log(
+        f"Using {workers} secure connections across {len(ranges)} verified chunks "
+        "for this GitHub release download"
+    )
+    progress(0, total)
+    futures: set[Future[None]] = set()
+    try:
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="gpm-download") as executor:
+            futures = {executor.submit(fetch_range, range_start, range_end) for range_start, range_end in ranges}
+            pending = set(futures)
+            while pending:
+                if cancel and cancel.is_set():
+                    stop.set()
+                finished, pending = wait(pending, timeout=0.1, return_when=FIRST_EXCEPTION)
+                with state_lock:
+                    current = received
+                progress(current, total)
+                for future in finished:
+                    error = future.exception()
+                    if error is not None:
+                        stop.set()
+                        for remaining_future in pending:
+                            remaining_future.cancel()
+                        raise error
+        progress(total, total)
+        return output, total
+    except BaseException:
+        stop.set()
+        output.unlink(missing_ok=True)
+        raise
+
+
+def _finish_download(package: Package, output: Path, version: str, written: int, log: Log) -> tuple[Path, str]:
+    if package.sha256:
+        try:
+            digest = hashlib.sha256()
+            with output.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            actual = digest.hexdigest()
+            if actual.lower() != package.sha256.lower():
+                raise RuntimeError(
+                    f"Checksum mismatch for {output.name}: "
+                    f"expected {package.sha256.lower()}, received {actual}"
+                )
+        except BaseException:
+            output.unlink(missing_ok=True)
+            raise
+        log(f"Verified SHA-256 for {output.name}")
+    log(f"Downloaded {output.name} ({written / (1024 * 1024):.1f} MiB)")
+    return output, version
+
+
 def download(
     package: Package,
     destination: Path,
@@ -154,6 +341,19 @@ def download(
     progress = progress or (lambda _done, _total: None)
     url, version = (resolve_github_release(package, log) if package.source_type == "github" else (package.url, package.version))
     destination.mkdir(parents=True, exist_ok=True)
+    if _is_github_release_url(url):
+        try:
+            parallel_output, parallel_size = _parallel_github_download(url, destination, progress, log, cancel)
+            return _finish_download(package, parallel_output, version, parallel_size, log)
+        except _ParallelDownloadUnavailable as exc:
+            log(f"Segmented GitHub download unavailable ({exc}); using one connection")
+        except DownloadCancelled:
+            raise
+        except (OSError, RuntimeError, TimeoutError, http.client.HTTPException, socket.timeout) as exc:
+            raise RuntimeError(
+                "GitHub's release server could not complete the segmented download after retries. "
+                "No application files were changed; retry the installation."
+            ) from exc
     output: Path | None = None
     filename = "download.bin"
     written = 0
@@ -248,20 +448,4 @@ def download(
                 raise DownloadCancelled("Download cancelled") from exc
     if output is None:
         raise RuntimeError(f"Download failed: {last_error or 'no response'}")
-    if package.sha256:
-        try:
-            digest = hashlib.sha256()
-            with output.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    digest.update(chunk)
-            actual = digest.hexdigest()
-            if actual.lower() != package.sha256.lower():
-                raise RuntimeError(
-                    f"Checksum mismatch for {filename}: expected {package.sha256.lower()}, received {actual}"
-                )
-        except BaseException:
-            output.unlink(missing_ok=True)
-            raise
-        log(f"Verified SHA-256 for {filename}")
-    log(f"Downloaded {filename} ({written / (1024 * 1024):.1f} MiB)")
-    return output, version
+    return _finish_download(package, output, version, written, log)

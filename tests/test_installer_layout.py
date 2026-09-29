@@ -48,11 +48,15 @@ def test_bundled_wheels_match_their_sha256_manifest() -> None:
 
 def test_first_launch_has_a_visible_activity_indicator() -> None:
     installer = (Path(__file__).parents[1] / "install.sh").read_text(encoding="utf-8")
+    entrypoint = (Path(__file__).parents[1] / "src" / "goinfre_pm" / "__main__.py").read_text(encoding="utf-8")
 
     assert "activity_start()" in installer
     assert "still working, please wait" in installer
-    assert "Starting the interface — please wait" in installer
+    assert "GPM_STARTUP_INDICATOR=1" in installer
     assert '[ -t 1 ] || return 0' in installer
+    assert "Starting the interface" in entrypoint
+    assert "sys.stdout.isatty()" in entrypoint
+    assert 'sys.stdout.write("\\r\\033[2K")' in entrypoint
 
 
 def test_installer_removes_only_the_retired_manager_autostart_entry() -> None:

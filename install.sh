@@ -47,9 +47,9 @@ activity_start() {
     (
         trap 'exit 0' HUP INT TERM
         while :; do
-            for activity_frame in '|' '/' '-' '\\'; do
+            for activity_frame in '⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏'; do
                 printf "\r%b[%s]%b %s %s" "$VIOLET" "$PROJECT_DISPLAY_NAME" "$RESET" "$activity_frame" "$activity_label"
-                sleep 1
+                sleep 0.12
             done
         done
     ) &
@@ -419,7 +419,8 @@ if [ "$RUN_ONCE" = "1" ]; then
     fi
     info "Full setup details: $BOOTSTRAP_LOG"
     printf "%b%s%b\n\n" "$BOLD$VIOLET" "$PROJECT_SIGNATURE" "$RESET"
-    info "Starting the interface — please wait"
+    GPM_STARTUP_INDICATOR=1
+    export GPM_STARTUP_INDICATOR
     exec "$MANAGER_VENV/bin/python" -m "$PROJECT_MODULE" "$@"
 fi
 
