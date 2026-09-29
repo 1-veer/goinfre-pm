@@ -100,11 +100,12 @@ root, and launches the code from the npm package. It does **not** create
 `.bashrc`, `.zshrc`, or Fish configuration. It keeps only small preferences in
 `~/.config/goinfre-pm`. npm itself may cache the small package under `~/.npm`;
 application payloads and the Python environment stay in goinfre. On a new
-post, the environment may need to be recreated, so the first launch needs
-PyPI access; later launches on the same post reuse it. The bootstrap prints
-only a few friendly status lines. Detailed Python environment and dependency
-output is saved to `<selected-root>/logs/bootstrap.log`; any setup failure
-prints that exact path.
+post, the environment may need to be recreated. The npm package includes the
+exact, SHA-256-verified Python wheels needed for that setup, so first launch
+does not make a chain of separate PyPI downloads. Later launches on the same
+post reuse the environment. The bootstrap prints only a few friendly status
+lines. Detailed Python environment and dependency output is saved to
+`<selected-root>/logs/bootstrap.log`; any setup failure prints that exact path.
 
 Before leaving a shared workstation, use **Clean this post before leaving** from
 the Ctrl+P palette, press `x` in the TUI, or run:
@@ -156,12 +157,14 @@ login-autostart entry automatically because it could race the visible Auto Setup
 
 ## Prerequisites
 
-The supported target is Ubuntu 22.04 on x86_64. The workstation needs Node.js
-and npm to provide `npx`, plus the standard Ubuntu Python 3.10 or newer. No
-sudo, system pip, `python3-venv`, or curl is required. The installer creates its
-private environment with `--without-pip`, then bootstraps a pinned pip wheel
-from official PyPI and verifies its SHA-256 before using it. Runtime and build
-dependencies are exact-version pinned for reproducible student installs.
+The supported target is Ubuntu 22.04 on x86_64. Other Linux distributions can
+work when they provide the same prerequisites. The workstation needs Node.js
+and npm to provide `npx`, plus Python 3.10 or newer. No sudo, system pip,
+`python3-venv`, or curl is required. The installer creates its private
+environment with `--without-pip`, then uses the pinned Python wheels bundled
+in the npm package after verifying every SHA-256 digest. Runtime and build
+dependencies are exact-version pinned for reproducible student installs. A
+secure PyPI fallback is retained only for damaged or incomplete source copies.
 
 Verify the result with:
 
@@ -177,9 +180,8 @@ dpkg-deb --version
 GoinfrePM and its npm bootstrap never invoke `sudo` or `apt`. If Node, Python,
 or `dpkg` is missing from a managed workstation, ask school staff to restore
 that standard Ubuntu tool. Network access to npm is needed when the npm package
-is not cached, and PyPI access is needed when the goinfre Python environment
-must be created or repaired. At least 256 MiB must be free before setup
-(individual applications need more).
+is not cached; normal first-launch Python setup no longer requires PyPI. At
+least 256 MiB must be free before setup (individual applications need more).
 
 To print this list without installing GoinfrePM, run:
 

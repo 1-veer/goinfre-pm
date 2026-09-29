@@ -135,7 +135,34 @@ def test_download_retries_an_interrupted_connection(monkeypatch, tmp_path) -> No
 
     assert calls == 2
     assert output.read_bytes() == payload
-    assert any("retrying" in message for message in messages)
+    assert any("reconnecting" in message for message in messages)
+
+
+def test_download_accepts_complete_payload_when_connection_closes_uncleanly(monkeypatch, tmp_path) -> None:
+    payload = b"complete payload"
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",),
+    )
+
+    class UncleanCloseResponse(DownloadResponse):
+        def __init__(self):
+            super().__init__(payload)
+            self.reads = 0
+
+        def read(self, _size=-1):
+            self.reads += 1
+            if self.reads == 1:
+                return payload
+            raise TimeoutError("proxy did not close the response cleanly")
+
+    monkeypatch.setattr(downloader, "_request", lambda *_args, **_kwargs: UncleanCloseResponse())
+    messages: list[str] = []
+
+    output, _version = downloader.download(package, tmp_path, log=messages.append)
+
+    assert output.read_bytes() == payload
+    assert any("complete payload" in message for message in messages)
 
 
 def test_download_resumes_partial_transfer(monkeypatch, tmp_path) -> None:
@@ -173,6 +200,48 @@ def test_download_resumes_partial_transfer(monkeypatch, tmp_path) -> None:
 
     assert output.read_bytes() == payload
     assert calls == [None, {"Range": "bytes=4-"}]
+
+
+def test_download_reconnects_and_resumes_an_abnormally_slow_connection(monkeypatch, tmp_path) -> None:
+    payload = b"abcdefghij"
+    package = Package(
+        "tool", "Tool", "fixture", "Tools", "https://example.invalid/tool.bin",
+        source_type="binary", architectures=("any",),
+    )
+    calls: list[dict[str, str] | None] = []
+
+    class SlowResponse(DownloadResponse):
+        def __init__(self):
+            super().__init__(payload, headers={"Content-Length": str(len(payload))})
+
+        def read(self, _size=-1):
+            return payload[:4]
+
+    def request(_url, _timeout=30, headers=None):
+        calls.append(headers)
+        if len(calls) == 1:
+            return SlowResponse()
+        assert headers == {"Range": "bytes=4-"}
+        return DownloadResponse(
+            payload[4:],
+            status=206,
+            headers={"Content-Length": "6", "Content-Range": "bytes 4-9/10"},
+        )
+
+    clock = iter((0.0, 2.0, 2.0, 2.0, 2.0))
+    monkeypatch.setattr(downloader, "MAX_DOWNLOAD_ATTEMPTS", 2)
+    monkeypatch.setattr(downloader, "SLOW_CONNECTION_WINDOW_SECONDS", 1)
+    monkeypatch.setattr(downloader, "MIN_USEFUL_DOWNLOAD_RATE", 1024)
+    monkeypatch.setattr(downloader, "LARGE_DOWNLOAD_REMAINDER", 1)
+    monkeypatch.setattr(downloader.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(downloader, "_request", request)
+    messages: list[str] = []
+
+    output, _version = downloader.download(package, tmp_path, log=messages.append)
+
+    assert output.read_bytes() == payload
+    assert calls == [None, {"Range": "bytes=4-"}]
+    assert any("keeping 0.0 MiB already received" in message for message in messages)
 
 
 def test_download_honors_cancellation_before_connecting(monkeypatch, tmp_path) -> None:

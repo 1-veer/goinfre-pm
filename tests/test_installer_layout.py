@@ -19,11 +19,31 @@ def test_installer_repairs_ubuntu_venv_without_sudo() -> None:
 
     assert "python3 -m venv --without-pip" in installer
     assert "PIP_BOOTSTRAP_SHA256=" in installer
-    assert "PYTHONPATH=$PIP_BOOTSTRAP_WHEEL" in installer
+    assert "PYTHONPATH=$pip_source" in installer
+    assert "wheel_bundle_is_valid()" in installer
+    assert '--no-index --find-links "$BUNDLED_WHEEL_DIR"' in installer
     assert '"$MANAGER_VENV/bin/python" -m pip --version' in installer
     assert "require_command curl" not in installer
     assert "require_command dpkg-deb" not in installer
     assert "sudo apt" not in installer
+
+
+def test_bundled_wheels_match_their_sha256_manifest() -> None:
+    project = Path(__file__).parents[1]
+    wheel_dir = project / "vendor" / "wheels"
+    entries: dict[str, str] = {}
+    for line in (wheel_dir / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+        digest, separator, name = line.partition("  ")
+        assert separator == "  "
+        assert Path(name).name == name
+        entries[name] = digest
+
+    wheels = {path.name for path in wheel_dir.glob("*.whl")}
+    assert wheels == set(entries)
+    assert "pip-24.3.1-py3-none-any.whl" in wheels
+    assert "textual-0.83.0-py3-none-any.whl" in wheels
+    for name, expected in entries.items():
+        assert hashlib.sha256((wheel_dir / name).read_bytes()).hexdigest() == expected
 
 
 def test_first_launch_has_a_visible_activity_indicator() -> None:

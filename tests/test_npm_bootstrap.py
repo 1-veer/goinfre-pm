@@ -22,6 +22,7 @@ def test_npm_package_contains_complete_local_installer() -> None:
         "packages.toml",
         "pyproject.toml",
         "requirements.txt",
+        "vendor/wheels/",
         "docs/tui-screenshot-placeholder.svg",
     ):
         assert required in metadata["files"]

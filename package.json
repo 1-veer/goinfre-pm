@@ -1,6 +1,6 @@
 {
   "name": "goinfre-pm",
-  "version": "1.5.18",
+  "version": "1.5.19",
   "description": "One-command bootstrap for the GoinfrePM no-sudo package manager",
   "license": "MIT",
   "author": "veer",
@@ -24,6 +24,7 @@
     "packages.toml",
     "pyproject.toml",
     "requirements.txt",
+    "vendor/wheels/",
     "docs/tui-screenshot-placeholder.svg",
     "README.md",
     "LICENSE",

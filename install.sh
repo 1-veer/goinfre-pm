@@ -123,16 +123,44 @@ fi
 PIP_BOOTSTRAP_VERSION=24.3.1
 PIP_BOOTSTRAP_SHA256=3790624780082365f47549d032f3770eeb2b1e8bd1f7b2e02dace1afa361b4ed
 PIP_BOOTSTRAP_URL=https://files.pythonhosted.org/packages/ef/7d/500c9ad20238fcfcb4cb9243eede163594d7020ce87bd9610c9e02771876/pip-24.3.1-py3-none-any.whl
+BUNDLED_WHEEL_DIR=$SCRIPT_DIR/vendor/wheels
+BUNDLED_WHEEL_MANIFEST=$BUNDLED_WHEEL_DIR/SHA256SUMS
+BUNDLED_PIP_WHEEL=$BUNDLED_WHEEL_DIR/pip-$PIP_BOOTSTRAP_VERSION-py3-none-any.whl
 PIP_BOOTSTRAP_DIR=$MANAGER_RUNTIME/bootstrap
 PIP_BOOTSTRAP_WHEEL=$PIP_BOOTSTRAP_DIR/pip-$PIP_BOOTSTRAP_VERSION-py3-none-any.whl
 
 pip_wheel_is_valid() {
-    [ -f "$PIP_BOOTSTRAP_WHEEL" ] && python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$PIP_BOOTSTRAP_WHEEL" | grep -F -x "$PIP_BOOTSTRAP_SHA256" >/dev/null 2>&1
+    [ -f "$1" ] && python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1" | grep -F -x "$PIP_BOOTSTRAP_SHA256" >/dev/null 2>&1
+}
+
+wheel_bundle_is_valid() {
+    [ -d "$BUNDLED_WHEEL_DIR" ] && [ -f "$BUNDLED_WHEEL_MANIFEST" ] || return 1
+    python3 - "$BUNDLED_WHEEL_DIR" "$BUNDLED_WHEEL_MANIFEST" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+wheel_dir = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+expected = {}
+for line in manifest.read_text(encoding="ascii").splitlines():
+    digest, separator, name = line.partition("  ")
+    if not separator or len(digest) != 64 or Path(name).name != name or not name.endswith(".whl"):
+        raise SystemExit(1)
+    expected[name] = digest
+actual = {path.name for path in wheel_dir.glob("*.whl")}
+if not expected or actual != set(expected):
+    raise SystemExit(1)
+for name, wanted in expected.items():
+    digest = hashlib.sha256((wheel_dir / name).read_bytes()).hexdigest()
+    if digest != wanted:
+        raise SystemExit(1)
+PY
 }
 
 download_pip_wheel() {
     mkdir -p "$PIP_BOOTSTRAP_DIR"
-    if pip_wheel_is_valid; then
+    if pip_wheel_is_valid "$PIP_BOOTSTRAP_WHEEL"; then
         return
     fi
     rm -f "$PIP_BOOTSTRAP_WHEEL"
@@ -186,7 +214,7 @@ PY
         activity_stop
         die "Could not securely download the private pip bootstrap from PyPI. Check the network and retry."
     fi
-    pip_wheel_is_valid || die "The private pip bootstrap download failed verification. Retry when PyPI is reachable."
+    pip_wheel_is_valid "$PIP_BOOTSTRAP_WHEEL" || die "The private pip bootstrap download failed verification. Retry when PyPI is reachable."
 }
 
 ensure_private_pip() {
@@ -198,10 +226,16 @@ ensure_private_pip() {
     fi
     SETUP_UPDATED=1
     log_note "Bootstrapping pip $PIP_BOOTSTRAP_VERSION inside the private environment"
-    download_pip_wheel
+    if [ "${WHEEL_BUNDLE_READY:-0}" = "1" ] && pip_wheel_is_valid "$BUNDLED_PIP_WHEEL"; then
+        pip_source=$BUNDLED_PIP_WHEEL
+        log_note "Using the verified pip wheel bundled with the npm package"
+    else
+        download_pip_wheel
+        pip_source=$PIP_BOOTSTRAP_WHEEL
+    fi
     activity_start "Preparing private Python tools — still working"
-    if PYTHONPATH=$PIP_BOOTSTRAP_WHEEL "$MANAGER_VENV/bin/python" -m pip install \
-        --disable-pip-version-check --no-index "$PIP_BOOTSTRAP_WHEEL" >> "$BOOTSTRAP_LOG" 2>&1; then
+    if PYTHONPATH=$pip_source "$MANAGER_VENV/bin/python" -m pip install \
+        --disable-pip-version-check --no-index "$pip_source" >> "$BOOTSTRAP_LOG" 2>&1; then
         activity_stop
     else
         activity_stop
@@ -307,6 +341,14 @@ chmod 600 "$BOOTSTRAP_LOG" 2>/dev/null || true
 info "Preparing $PROJECT_DISPLAY_NAME $PROJECT_VERSION"
 ok "Storage ready: $GPM_ROOT ($((FREE_KB / 1024)) MiB free)"
 SETUP_UPDATED=0
+WHEEL_BUNDLE_READY=0
+if wheel_bundle_is_valid; then
+    WHEEL_BUNDLE_READY=1
+    log_note "Verified the bundled offline Python dependency set"
+else
+    warn "Bundled Python dependencies failed verification; secure network fallback will be used."
+    log_note "Bundled Python dependencies were unavailable or failed verification"
+fi
 
 if [ ! -x "$MANAGER_VENV/bin/python" ]; then
     info "Creating a private Python environment (first launch only)"
@@ -339,8 +381,24 @@ if [ "$RUN_ONCE" = "1" ]; then
         log_note "Installing pinned Python dependencies from requirements.txt"
         rm -f "$REQUIREMENTS_MARKER"
         activity_start "Installing the interface — still working, please wait"
-        if "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-            --cache-dir "$PIP_CACHE_DIR" --timeout 20 --retries 4 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
+        if [ "$WHEEL_BUNDLE_READY" = "1" ]; then
+            log_note "Installing verified bundled dependencies without contacting PyPI"
+            if "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+                --no-index --find-links "$BUNDLED_WHEEL_DIR" -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
+                dependencies_ready=1
+            else
+                dependencies_ready=0
+            fi
+        else
+            log_note "Installing dependencies from PyPI because the bundle is unavailable"
+            if "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+                --cache-dir "$PIP_CACHE_DIR" --timeout 20 --retries 4 -r "$SCRIPT_DIR/requirements.txt" >> "$BOOTSTRAP_LOG" 2>&1; then
+                dependencies_ready=1
+            else
+                dependencies_ready=0
+            fi
+        fi
+        if [ "$dependencies_ready" -eq 1 ]; then
             activity_stop
         else
             activity_stop
@@ -367,11 +425,20 @@ fi
 
 info "Installing pinned dependencies and project files"
 log_note "Installing pinned dependencies and project files"
-if ! "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
-    --cache-dir "$GPM_ROOT/downloads/pip-cache" --timeout 20 --retries 4 --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1; then
+if [ "$WHEEL_BUNDLE_READY" = "1" ]; then
+    "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check --no-index \
+        --find-links "$BUNDLED_WHEEL_DIR" --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1 || install_status=$?
+else
+    "$MANAGER_VENV/bin/python" -m pip install --disable-pip-version-check \
+        --cache-dir "$GPM_ROOT/downloads/pip-cache" --timeout 20 --retries 4 --upgrade "$SCRIPT_DIR" >> "$BOOTSTRAP_LOG" 2>&1 || install_status=$?
+fi
+if [ "${install_status:-0}" -ne 0 ]; then
     if "$MANAGER_VENV/bin/python" -c 'import textual' >/dev/null 2>&1; then
-        warn "PyPI is unreachable; reusing dependencies and updating local project files only."
+        warn "The normal project install failed; reusing verified dependencies and updating local project files only."
     else
+        if [ "$WHEEL_BUNDLE_READY" = "1" ]; then
+            die "Could not install the bundled Python dependencies. Review the setup log and retry."
+        fi
         die "Could not download the Python dependencies from PyPI. Check the network and retry."
     fi
     SITE_PACKAGES=$("$MANAGER_VENV/bin/python" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')

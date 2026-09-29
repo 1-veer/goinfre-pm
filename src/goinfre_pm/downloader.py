@@ -20,6 +20,12 @@ from .models import Package, current_architecture
 Progress = Callable[[int, int | None], None]
 Log = Callable[[str], None]
 
+CONNECT_TIMEOUT_SECONDS = 6
+MAX_DOWNLOAD_ATTEMPTS = 5
+SLOW_CONNECTION_WINDOW_SECONDS = 8
+MIN_USEFUL_DOWNLOAD_RATE = 384 * 1024
+LARGE_DOWNLOAD_REMAINDER = 16 * 1024 * 1024
+
 
 class DownloadCancelled(RuntimeError):
     pass
@@ -156,12 +162,12 @@ def download(
     # Campus mirrors and Wi-Fi occasionally accept a connection that then
     # stops delivering data. Reconnect automatically instead of requiring the
     # student to cancel and start the entire install again.
-    for attempt in range(1, 4):
+    for attempt in range(1, MAX_DOWNLOAD_ATTEMPTS + 1):
         if cancel and cancel.is_set():
             raise DownloadCancelled("Download cancelled")
         try:
             headers = {"Range": f"bytes={written}-"} if written else None
-            request_args = (url, 8, headers) if headers else (url, 8)
+            request_args = (url, CONNECT_TIMEOUT_SECONDS, headers) if headers else (url, CONNECT_TIMEOUT_SECONDS)
             with _request(*request_args) as response:
                 response_name = _response_name(response, url)
                 if output is None:
@@ -201,9 +207,20 @@ def download(
                         progress(written, total)
                         now = time.monotonic()
                         window_elapsed = now - window_started
-                        if attempt < 3 and window_elapsed >= 20 and window_bytes / window_elapsed < 128 * 1024:
-                            raise TimeoutError("download stayed below 128 KiB/s for 20 seconds")
-                        if window_elapsed >= 20:
+                        remaining = None if total is None else max(total - written, 0)
+                        large_transfer = remaining is None or remaining >= LARGE_DOWNLOAD_REMAINDER
+                        if (
+                            attempt < MAX_DOWNLOAD_ATTEMPTS
+                            and large_transfer
+                            and window_elapsed >= SLOW_CONNECTION_WINDOW_SECONDS
+                            and window_bytes / window_elapsed < MIN_USEFUL_DOWNLOAD_RATE
+                        ):
+                            rate_kib = window_bytes / window_elapsed / 1024
+                            raise TimeoutError(
+                                f"connection averaged only {rate_kib:.0f} KiB/s for "
+                                f"{SLOW_CONNECTION_WINDOW_SECONDS} seconds"
+                            )
+                        if window_elapsed >= SLOW_CONNECTION_WINDOW_SECONDS:
                             window_started, window_bytes = now, 0
             if total is not None and written != total:
                 raise http.client.IncompleteRead(b"", total - written)
@@ -214,15 +231,20 @@ def download(
             raise
         except (OSError, RuntimeError, TimeoutError, http.client.HTTPException, socket.timeout) as exc:
             last_error = exc
-            if attempt == 3:
+            if output is not None and total is not None and written == total:
+                log("The connection closed after the complete payload was received; continuing safely")
+                break
+            if attempt == MAX_DOWNLOAD_ATTEMPTS:
                 if output is not None:
                     output.unlink(missing_ok=True)
-                raise RuntimeError(f"Download failed after 3 attempts: {exc}") from exc
+                raise RuntimeError(f"Download failed after {MAX_DOWNLOAD_ATTEMPTS} attempts: {exc}") from exc
+            preserved_mib = written / (1024 * 1024)
             log(
                 "Download connection was too slow or interrupted; "
-                f"retrying the connection and resuming ({attempt}/3)"
+                f"reconnecting and keeping {preserved_mib:.1f} MiB already received "
+                f"({attempt}/{MAX_DOWNLOAD_ATTEMPTS})"
             )
-            if cancel and cancel.wait(min(attempt, 2)):
+            if cancel and cancel.wait(0.25):
                 raise DownloadCancelled("Download cancelled") from exc
     if output is None:
         raise RuntimeError(f"Download failed: {last_error or 'no response'}")
